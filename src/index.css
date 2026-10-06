@@ -1,0 +1,58 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/inter';
+
+@theme {
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+
+  --color-canvas: #101412;
+  --color-bg: #151a18;
+  --color-surface: #1b2220;
+  --color-raised: #232b28;
+  --color-line: #2a332f;
+  --color-line-strong: #38443f;
+
+  --color-fg: #e9efec;
+  --color-muted: #8e9a94;
+  --color-faint: #5f6b65;
+
+  --color-accent: #5ad08a;
+  --color-accent-ink: #07120b;
+
+  --color-easy: #5ad08a;
+  --color-medium: #e5c35b;
+  --color-hard: #ee9a52;
+  --color-extreme: #ef6a63;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    margin: 0;
+    background: var(--color-canvas);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--color-accent) 35%, transparent);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
+    }
+  }
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
