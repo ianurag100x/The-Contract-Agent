@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import {
   AchievementsCard,
   ActivityCard,
@@ -10,7 +11,8 @@ import {
   StatsCard,
 } from '../components/dashboard'
 import { PageHeader, StatStrip } from '../components/ui'
-import { globalStats } from '../data/agent'
+import { globalStats as defaultStats } from '../data/agent'
+import { dashboardApi } from '../lib/api'
 import { useContractState } from '../state/contract'
 
 /** Lets reviewers flip between the two dashboard states from the product sheet. */
@@ -45,22 +47,54 @@ function DemoToggle() {
 
 export default function DashboardPage() {
   const { started } = useContractState()
-  const fmt = (n: number) => n.toLocaleString('en-US')
+  const [stats, setStats] = useState<any>(defaultStats)
+  const [dbSource, setDbSource] = useState<string>('connecting...')
+  const fmt = (n: number) => (n ?? 0).toLocaleString('en-US')
+
+  useEffect(() => {
+    let mounted = true
+
+    const fetchStats = () => {
+      dashboardApi.getStats().then((data) => {
+        if (mounted && data?.globalStats) {
+          setStats(data.globalStats)
+          setDbSource((data.globalStats as any).source === 'supabase' ? 'Supabase Live' : 'Database Active')
+        }
+      })
+    }
+
+    fetchStats()
+    // Poll every 3 seconds for real-time live database updates
+    const timer = setInterval(fetchStats, 3000)
+
+    return () => {
+      mounted = false
+      clearInterval(timer)
+    }
+  }, [])
 
   return (
     <>
       <PageHeader
         title="Dashboard"
-        subtitle="How The Contract is doing, what is happening now, and what to do next."
+        subtitle={
+          <span className="flex items-center gap-2">
+            <span>How The Contract is doing, what is happening now, and what to do next.</span>
+            <span className="inline-flex items-center gap-1 rounded-full bg-accent/10 px-2 py-0.5 text-[11px] font-medium text-accent">
+              <span className="size-1.5 rounded-full bg-accent animate-pulse" />
+              {dbSource}
+            </span>
+          </span>
+        }
         right={<DemoToggle />}
       />
 
       <StatStrip
         items={[
-          { label: 'Registered Agents', value: fmt(globalStats.registered) },
-          { label: 'Active Agents', value: fmt(globalStats.active) },
-          { label: 'Contracts Completed', value: fmt(globalStats.completed) },
-          { label: 'Total Rewards Paid', value: globalStats.rewardsPaid },
+          { label: 'Registered Agents', value: fmt(stats.registered) },
+          { label: 'Active Agents', value: fmt(stats.active) },
+          { label: 'Contracts Completed', value: fmt(stats.completed) },
+          { label: 'Total Rewards Paid', value: stats.rewardsPaid },
         ]}
       />
 

@@ -1,4 +1,5 @@
-import { Crown, Trophy } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Coins, Crown, Trophy } from 'lucide-react'
 import ObjectiveList from '../components/ObjectiveList'
 import {
   buttonClass,
@@ -8,25 +9,53 @@ import {
   SegmentedBar,
   StatStrip,
 } from '../components/ui'
-import { standings, today } from '../data/mock'
+import { standings as defaultStandings } from '../data/mock'
 import { useNow } from '../hooks/useNow'
+import { contractApi } from '../lib/api'
 import { duration, hms } from '../lib/format'
 import { contractTypeMeta } from '../lib/meta'
+import { useAdmin } from '../state/admin'
 import { useContractState } from '../state/contract'
 
 export default function ContractPage() {
   const now = useNow()
   const { started, setStarted } = useContractState()
-  const type = contractTypeMeta[today.type]
-  const done = today.objectives.filter((o) => o.current >= o.target).length
-  const leader = standings[0]
-  const you = standings.find((s) => s.isYou)!
-  const visibleStandings = started ? standings : standings.filter((s) => !s.isYou)
+  const { contract: adminContract } = useAdmin()
+  const [activeData, setActiveData] = useState<any>(null)
+
+  const loadActive = () => {
+    contractApi.getActive().then((res) => {
+      if (res) {
+        setActiveData(res)
+      }
+    })
+  }
+
+  useEffect(() => {
+    loadActive()
+  }, [])
+
+  const contract = activeData?.contract || adminContract
+  const participant = activeData?.participant || { progress: 6, partialRewardsEarned: 2850000, rank: 14 }
+  const standings = activeData?.standings || defaultStandings
+
+  const type = contractTypeMeta[contract.type] || contractTypeMeta.standard
+  const done = participant.progress || contract.objectives.filter((o: any) => o.current >= o.target).length
+  const leader = standings[0] || { name: 'PlayerA', minutes: 197, completed: 9 }
+  const you = standings.find((s: any) => s.isYou) || { rank: 14 }
+  const visibleStandings = started ? standings : standings.filter((s: any) => !s.isYou)
+
+  const handleVerify = async (idx: number) => {
+    const res = await contractApi.verifyObjective(idx)
+    if (res?.success) {
+      loadActive()
+    }
+  }
 
   return (
     <>
       <PageHeader
-        title={`Contract #${today.number}`}
+        title={`Contract #${contract.number || contract.id || 1847}`}
         subtitle="One contract. Ten objectives. One winner."
         right={
           <div className="flex items-center gap-2">
@@ -67,27 +96,27 @@ export default function ContractPage() {
         items={[
           {
             label: 'Time remaining',
-            value: hms(today.endsAt - now),
+            value: hms(Math.max(0, (contract.endsAt || Date.now() + 60000000) - now)),
           },
           {
             label: 'Your progress',
             value: started ? (
               <>
-                {done} <span className="text-muted">/ {today.objectives.length}</span>
+                {done} <span className="text-muted">/ {contract.objectives.length}</span>
               </>
             ) : (
               '—'
             ),
           },
           {
-            label: 'Current leader',
-            value: (
-              <>
-                {leader.name}{' '}
-                <span className="text-sm font-normal text-muted">
-                  {duration(leader.minutes)}
-                </span>
-              </>
+            label: 'Partial Bounties',
+            value: started ? (
+              <span className="text-accent font-semibold flex items-center gap-1">
+                <Coins className="size-4" />
+                ${((participant.partialRewardsEarned || 0) / 1000).toFixed(0)}k
+              </span>
+            ) : (
+              '—'
             ),
           },
           { label: 'Your position', value: started ? `#${you.rank}` : '—' },
@@ -103,23 +132,27 @@ export default function ContractPage() {
           action={
             started && (
               <span className="tabular text-xs text-muted">
-                {done} of {today.objectives.length} verified
+                {done} of {contract.objectives.length} verified
               </span>
             )
           }
         >
           {started && (
             <div className="px-4 pb-4 sm:px-5">
-              <SegmentedBar done={done} total={today.objectives.length} />
+              <SegmentedBar done={done} total={contract.objectives.length} />
             </div>
           )}
-          <ObjectiveList objectives={today.objectives} preview={!started} />
+          <ObjectiveList
+            objectives={contract.objectives}
+            preview={!started}
+            onVerify={handleVerify}
+          />
         </Card>
 
         <div className="flex flex-col gap-5">
-          <Card title="Prize">
+          <Card title="Prize & Partial Bounties">
             <div className="flex flex-col gap-3 px-4 pb-4 sm:px-5">
-              {today.rewards.map((r) => (
+              {contract.rewards?.map((r: any) => (
                 <div
                   key={r.place}
                   className="flex items-center gap-3 rounded-xl border border-line bg-raised/50 p-3.5"
@@ -133,19 +166,30 @@ export default function ContractPage() {
                   </div>
                 </div>
               ))}
+
+              <div className="rounded-xl border border-accent/20 bg-accent/5 p-3.5 text-xs">
+                <p className="font-semibold text-fg flex items-center gap-1.5">
+                  <Coins className="size-4 text-accent" />
+                  Partial Objective Bounty
+                </p>
+                <p className="mt-1 text-muted">
+                  Receive <span className="font-medium text-accent">+$500,000</span> for every verified objective even if you don't take 1st place!
+                </p>
+              </div>
+
               <p className="text-[13px] leading-relaxed text-muted">
-                <span className="font-medium text-fg">{type.winners}.</span>{' '}
+                <span className="font-medium text-fg">{contract.winnerConfig || type.winners}.</span>{' '}
                 {type.blurb} Only fully verified contracts count.
               </p>
               <p className="tabular text-xs text-faint">
-                {today.participants.toLocaleString('en-US')} agents
+                {(contract.participants || 482).toLocaleString('en-US')} agents registered
               </p>
             </div>
           </Card>
 
           <Card title="Live standings">
             <ul className="flex flex-col gap-1 px-2 pb-3 sm:px-3">
-              {visibleStandings.map((s) => (
+              {visibleStandings.map((s: any) => (
                 <li
                   key={s.rank}
                   className={`flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm ${

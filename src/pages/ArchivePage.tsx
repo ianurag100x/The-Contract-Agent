@@ -1,11 +1,27 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ChevronRight } from 'lucide-react'
 import { Card, PageHeader } from '../components/ui'
-import { archive } from '../data/mock'
+import { archive as defaultArchive } from '../data/mock'
+import { archiveApi } from '../lib/api'
 import { duration } from '../lib/format'
 import { contractTypeMeta } from '../lib/meta'
 
 export default function ArchivePage() {
+  const [archiveList, setArchiveList] = useState(defaultArchive)
+
+  useEffect(() => {
+    let mounted = true
+    archiveApi.getHistory().then((res) => {
+      if (mounted && res && res.length > 0) {
+        setArchiveList(res)
+      }
+    })
+    return () => {
+      mounted = false
+    }
+  }, [])
+
   return (
     <>
       <PageHeader
@@ -29,7 +45,7 @@ export default function ArchivePage() {
               </tr>
             </thead>
             <tbody>
-              {archive.map((e) => (
+              {archiveList.map((e) => (
                 <tr
                   key={e.number}
                   className="border-b border-line last:border-0 hover:bg-raised/40"
@@ -44,12 +60,12 @@ export default function ArchivePage() {
                   </td>
                   <td className="px-3 py-3.5 text-muted">{e.date}</td>
                   <td className="px-3 py-3.5 text-muted">
-                    {contractTypeMeta[e.type].label}
+                    {contractTypeMeta[e.type]?.label || e.type}
                     <span className="text-faint">
-                      {' '}· {contractTypeMeta[e.type].winners}
+                      {' '}· {contractTypeMeta[e.type]?.winners || '1 winner'}
                     </span>
                   </td>
-                  <td className="px-3 py-3.5">{e.winner}</td>
+                  <td className="px-3 py-3.5 font-medium">{e.winner}</td>
                   <td className="tabular px-3 py-3.5">{duration(e.minutes)}</td>
                   <td className="px-5 py-3.5 text-right text-faint">
                     <ChevronRight className="inline size-4" aria-hidden />
@@ -62,7 +78,7 @@ export default function ArchivePage() {
 
         {/* Cards < md */}
         <ul className="divide-y divide-line md:hidden">
-          {archive.map((e) => (
+          {archiveList.map((e) => (
             <li key={e.number}>
               <Link
                 to={`/archive/${e.number}`}
@@ -74,7 +90,7 @@ export default function ArchivePage() {
                     <span className="font-normal text-muted">· {e.date}</span>
                   </p>
                   <p className="mt-0.5 truncate text-xs text-muted">
-                    {contractTypeMeta[e.type].label} · {e.winner} ·{' '}
+                    {contractTypeMeta[e.type]?.label || e.type} · {e.winner} ·{' '}
                     {duration(e.minutes)}
                   </p>
                 </div>

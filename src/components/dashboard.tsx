@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Archive,
@@ -20,21 +20,20 @@ import {
 } from 'lucide-react'
 import {
   achievements,
-  activity,
+  activity as defaultActivity,
   agentStats,
-  announcements,
+  announcements as defaultAnnouncements,
   type AchievementIcon,
   type ActivityKind,
 } from '../data/agent'
-import { standings, today } from '../data/mock'
+import { dashboardApi } from '../lib/api'
+import { standings } from '../data/mock'
 import { useNow } from '../hooks/useNow'
 import { hm, hms } from '../lib/format'
 import { contractTypeMeta } from '../lib/meta'
 import { useContractState } from '../state/contract'
+import { useAdmin } from '../state/admin'
 import { buttonClass, Card, MiniBar, Pill, SegmentedBar } from './ui'
-
-const total = today.objectives.length
-const doneCount = () => today.objectives.filter((o) => o.current >= o.target).length
 
 function Tile({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -49,12 +48,14 @@ function Tile({ label, children }: { label: string; children: ReactNode }) {
 
 export function ContractHero() {
   const { started, setStarted } = useContractState()
+  const { contract } = useAdmin()
   const now = useNow()
-  const remaining = today.endsAt - now
-  const type = contractTypeMeta[today.type]
-  const done = doneCount()
+  const remaining = Math.max(0, contract.endsAt - now)
+  const type = contractTypeMeta[contract.type] || contractTypeMeta.standard
+  const total = contract.objectives.length
+  const done = contract.objectives.filter((o) => o.current >= o.target).length
   const leader = standings[0]
-  const you = standings.find((s) => s.isYou)!
+  const you = standings.find((s) => s.isYou) || { rank: 14 }
 
   if (!started) {
     return (
@@ -69,7 +70,7 @@ export function ContractHero() {
 
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
           <Tile label="Contract">
-            <p className="tabular text-xl font-semibold">#{today.number}</p>
+            <p className="tabular text-xl font-semibold">#{contract.number}</p>
             <p className="mt-0.5 text-xs text-muted">{total} Objectives</p>
           </Tile>
           <Tile label="Remaining">
@@ -77,7 +78,7 @@ export function ContractHero() {
           </Tile>
           <div className="sm:col-span-2">
             <Tile label="Prize">
-              <p className="text-xl font-semibold">{today.rewards[0].reward}</p>
+              <p className="text-xl font-semibold">{contract.rewards[0]?.reward || '$10M + 1x Xanax'}</p>
             </Tile>
           </div>
         </div>
@@ -108,7 +109,7 @@ export function ContractHero() {
         {type.label.toUpperCase()} • ACTIVE
       </Pill>
       <h2 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
-        Contract #{today.number}
+        Contract #{contract.number}
       </h2>
       <p className="mt-1 text-sm text-muted">
         One contract. Ten objectives. One winner.
@@ -157,15 +158,17 @@ export function ContractHero() {
 
 export function ContractPreview() {
   const now = useNow()
-  const type = contractTypeMeta[today.type]
+  const { contract } = useAdmin()
+  const type = contractTypeMeta[contract.type] || contractTypeMeta.standard
+  const total = contract.objectives.length
   const rows: [string, string][] = [
-    ['Contract', `#${today.number}`],
+    ['Contract', `#${contract.number}`],
     ['Type', type.label.toUpperCase()],
     ['Objectives', String(total)],
-    ['Winners', type.winners],
-    ['Prize', '$10M + 1× Xanax'],
-    ['Agents', today.participants.toLocaleString('en-US')],
-    ['Time Remaining', hm(today.endsAt - now)],
+    ['Winners', contract.winnerConfig || type.winners],
+    ['Prize', contract.rewards[0]?.reward || '$10M + 1× Xanax'],
+    ['Agents', contract.participants.toLocaleString('en-US')],
+    ['Time Remaining', hm(Math.max(0, contract.endsAt - now))],
   ]
   return (
     <Card title="Today's Contract">
@@ -187,7 +190,8 @@ export function ContractPreview() {
 /* ---------- 5. Your contract progress (navigate to contract) ---------- */
 
 export function ProgressCard() {
-  const remaining = today.objectives
+  const { contract } = useAdmin()
+  const remaining = contract.objectives
     .filter((o) => o.current < o.target)
     .sort((a, b) => b.current / b.target - a.current / a.target)
 
@@ -361,9 +365,24 @@ export function AchievementsCard() {
 
 export function AnnouncementsCard() {
   const now = useNow(30_000)
-  const minsLeft = (today.endsAt - now) / 60000
+  const { contract } = useAdmin()
+  const [annList, setAnnList] = useState(defaultAnnouncements)
+
+  useEffect(() => {
+    let mounted = true
+    dashboardApi.getStats().then((res) => {
+      if (mounted && res?.announcements && res.announcements.length > 0) {
+        setAnnList(res.announcements)
+      }
+    })
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  const minsLeft = (contract.endsAt - now) / 60000
   const items = [
-    ...(minsLeft <= 60
+    ...(minsLeft <= 60 && minsLeft > 0
       ? [
           {
             id: 'ending',
@@ -374,7 +393,18 @@ export function AnnouncementsCard() {
           },
         ]
       : []),
-    ...announcements.map((a) => ({ ...a, warn: false })),
+    ...(contract.status === 'paused'
+      ? [
+          {
+            id: 'paused',
+            title: 'Contract Temporarily Paused',
+            body: 'Administrators have paused objective verification.',
+            ago: 'now',
+            warn: true,
+          },
+        ]
+      : []),
+    ...annList.map((a) => ({ ...a, warn: false })),
   ]
   return (
     <Card title="Announcements">
@@ -416,6 +446,20 @@ const activityIcons: Record<ActivityKind, LucideIcon> = {
 }
 
 export function ActivityCard() {
+  const [activityList, setActivityList] = useState(defaultActivity)
+
+  useEffect(() => {
+    let mounted = true
+    dashboardApi.getStats().then((res) => {
+      if (mounted && res?.activity && res.activity.length > 0) {
+        setActivityList(res.activity)
+      }
+    })
+    return () => {
+      mounted = false
+    }
+  }, [])
+
   return (
     <Card
       title="Live Activity"
@@ -427,8 +471,8 @@ export function ActivityCard() {
       }
     >
       <ul className="flex flex-col gap-3 px-4 pb-4 sm:px-5">
-        {activity.map((a) => {
-          const Icon = activityIcons[a.kind]
+        {activityList.map((a) => {
+          const Icon = activityIcons[a.kind] || CheckCircle2
           return (
             <li key={a.id} className="flex items-center gap-3 text-sm">
               <Icon className="size-4 shrink-0 text-muted" aria-hidden />

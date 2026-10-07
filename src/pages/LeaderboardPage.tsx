@@ -1,8 +1,24 @@
+import { useEffect, useState } from 'react'
 import { Card, PageHeader } from '../components/ui'
-import { champions } from '../data/mock'
+import { champions as defaultChampions } from '../data/mock'
+import { leaderboardApi } from '../lib/api'
 import { duration } from '../lib/format'
 
 export default function LeaderboardPage() {
+  const [championList, setChampionList] = useState(defaultChampions)
+
+  useEffect(() => {
+    let mounted = true
+    leaderboardApi.getLeaderboard().then((res) => {
+      if (mounted && res?.champions && res.champions.length > 0) {
+        setChampionList(res.champions)
+      }
+    })
+    return () => {
+      mounted = false
+    }
+  }, [])
+
   return (
     <>
       <PageHeader
@@ -26,7 +42,7 @@ export default function LeaderboardPage() {
               </tr>
             </thead>
             <tbody>
-              {champions.map((c, i) => (
+              {championList.map((c, i) => (
                 <tr
                   key={c.name}
                   className="border-b border-line last:border-0 hover:bg-raised/40"
@@ -36,7 +52,7 @@ export default function LeaderboardPage() {
                   <td className="tabular px-3 py-3.5">{c.wins}</td>
                   <td className="tabular px-3 py-3.5">{c.top3}</td>
                   <td className="tabular px-3 py-3.5">{c.completed}</td>
-                  <td className="tabular px-5 py-3.5">{duration(c.fastestMin)}</td>
+                  <td className="tabular px-5 py-3.5">{duration(c.fastestMin || 110)}</td>
                 </tr>
               ))}
             </tbody>
@@ -45,7 +61,7 @@ export default function LeaderboardPage() {
 
         {/* Cards < md */}
         <ol className="divide-y divide-line md:hidden">
-          {champions.map((c, i) => (
+          {championList.map((c, i) => (
             <li key={c.name} className="px-4 py-3.5">
               <div className="flex items-baseline justify-between">
                 <p className="text-sm font-medium">
@@ -53,7 +69,7 @@ export default function LeaderboardPage() {
                   {c.name}
                 </p>
                 <p className="tabular text-xs text-muted">
-                  Fastest {duration(c.fastestMin)}
+                  Fastest {duration(c.fastestMin || 110)}
                 </p>
               </div>
               <dl className="tabular mt-2 grid grid-cols-3 gap-2 text-xs">
