@@ -1,0 +1,24 @@
+Few important pointers for contracts:
+
+- Contracts ID is manually assigned, 
+- Contract type (the current setting is good, no need to chang)
+- Remove partial Bounty
+- The CTA button should be save as draft or schedule.
+
+Once the contract has been created it should show in the admin-> contracts section. The contracts details should be listed along with creation date and tagged either scheduled, active, draft. By default any new created contract is marked draft and it doesn't show on any user/agent end. No objectives are assigned to this new contract automatically, the admin has to manually configure the contracts tasks.
+
+
+For schedule contracts admin should be able to set a time, once the world clock reaches the time, the contract gets published to all the agents or auto replaced with the existing contract. Making the existing contract marked with complete tag. The admin can then view participants and their progress, declare rewards etc..
+
+
+About Contract Controls:
+- Pause should pause the timer of contract on both admin and agent end.
+- Extend should popup a box where admin can specify amount of time in minutes and the contract time gets extended.
+- End and Declare - The contract can be end by admin at will. With the name of winner, or if no winner it can be left empty.
+- Cancel Contract - Cancel the contract and tag it as cancelled. 
+- Remove the Partial Objective Bounties option in the contract controls.
+- Reset should reset the progress of contract progress on every user/agents end. 
+
+The tags/status of contract should also be visible on agent/user end, like active, completed, cancelled, paused.
+
+
