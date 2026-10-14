@@ -62,7 +62,7 @@ export function PageHeader({
   right,
 }: {
   title: string
-  subtitle: string
+  subtitle: ReactNode
   right?: ReactNode
 }) {
   return (
@@ -78,15 +78,16 @@ export function PageHeader({
   )
 }
 
-export function DifficultyBadge({ difficulty }: { difficulty: Difficulty }) {
-  const m = difficultyMeta[difficulty]
+export function DifficultyBadge({ difficulty }: { difficulty?: Difficulty | string }) {
+  const diffKey = (difficulty && difficulty.toLowerCase()) as Difficulty
+  const m = difficultyMeta[diffKey] || difficultyMeta.easy
   return (
     <span className="inline-flex items-center gap-1.5 text-xs text-muted">
       <span
         aria-hidden
-        className={`size-1.5 rounded-full ${m.className}`}
+        className={`size-1.5 rounded-full ${m.className || 'bg-easy'}`}
       />
-      {m.label}
+      {m.label || 'Easy'}
     </span>
   )
 }
@@ -96,11 +97,14 @@ export function Pill({
   tone = 'neutral',
 }: {
   children: ReactNode
-  tone?: 'neutral' | 'accent'
+  tone?: 'neutral' | 'accent' | 'hard' | 'extreme' | 'medium'
 }) {
   const tones = {
     neutral: 'border-line-strong bg-raised text-muted',
     accent: 'border-accent/30 bg-accent/10 text-accent',
+    hard: 'border-hard/30 bg-hard/10 text-hard',
+    extreme: 'border-extreme/30 bg-extreme/10 text-extreme',
+    medium: 'border-medium/30 bg-medium/10 text-medium',
   }
   return (
     <span

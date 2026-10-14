@@ -10,13 +10,24 @@ export type Category =
 
 export type ContractType = 'standard' | 'elite' | 'black' | 'survival'
 
+export type Complexity = 'easy' | 'medium' | 'hard' | 'extreme'
+
 export interface Objective {
   id: number
   title: string
+  name?: string
   category: Category
   difficulty: Difficulty
+  complexity?: Complexity
   current: number
   target: number
+  bounty?: number
+  partialReward?: number
+  agent_note?: string
+  log_pattern?: string
+  log_patterns?: any[]
+  metric?: 'count' | 'sum' | 'distinct'
+  verification?: 'log' | 'manual'
 }
 
 export interface Reward {

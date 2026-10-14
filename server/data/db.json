@@ -63,11 +63,33 @@
   ],
   "contracts": [
     {
+      "id": 2007,
+      "status": "cancelled",
+      "type": "standard",
+      "starts_at": "Oct 8, 2026 — 12:00 AM",
+      "ends_at": 1792046154352,
+      "max_objectives": 10,
+      "winner_count": "1 winner",
+      "created_by": "Admin01",
+      "created_at": "2026-10-14T06:35:54.352Z",
+      "reward_configuration": [
+        {
+          "place": "1st",
+          "reward": "$10,000,000 + 1× Xanax"
+        }
+      ],
+      "partial_rewards_enabled": false,
+      "partial_reward_per_objective": 0,
+      "settings": {},
+      "generation_method": "random_balanced",
+      "objectives": []
+    },
+    {
       "id": 1847,
       "status": "active",
       "type": "standard",
       "starts_at": "Oct 7, 2026 — 12:00 AM",
-      "ends_at": 1791400008544,
+      "ends_at": 1792024667809,
       "max_objectives": 10,
       "winner_count": "1 winner",
       "created_by": "Admin01",
@@ -84,7 +106,223 @@
         "tie_breaking": "fastest_time"
       },
       "generation_method": "random_balanced",
-      "winner_status": "Awaiting Final Verification"
+      "winner_status": "Awaiting Final Verification",
+      "objectives": [
+        {
+          "id": 1,
+          "objId": "co-1",
+          "title": "Defeat 5 players in attacks",
+          "category": "combat",
+          "difficulty": "easy",
+          "complexity": "easy",
+          "target": 5,
+          "partialReward": 250000,
+          "bounty": 250000,
+          "agent_note": "Torn attacks",
+          "metric": "count",
+          "log_pattern": "You used {energy:int} energy attacking {opponent:text} and defeated them",
+          "log_patterns": [
+            {
+              "key": "pat_co-1_1",
+              "template": "You used {energy:int} energy attacking {opponent:text} and defeated them"
+            }
+          ],
+          "current": 0
+        },
+        {
+          "id": 2,
+          "objId": "co-2",
+          "title": "Defeat 10 players in attacks",
+          "category": "combat",
+          "difficulty": "medium",
+          "complexity": "medium",
+          "target": 10,
+          "partialReward": 500000,
+          "bounty": 500000,
+          "agent_note": "Hospitalize or mug",
+          "metric": "count",
+          "log_pattern": "You used {energy:int} energy attacking {opponent:text} and [hospitalized|mugged|defeated] them",
+          "log_patterns": [
+            {
+              "key": "pat_co-2_1",
+              "template": "You used {energy:int} energy attacking {opponent:text} and [hospitalized|mugged|defeated] them"
+            }
+          ],
+          "current": 0
+        },
+        {
+          "id": 3,
+          "objId": "co-3",
+          "title": "Travel to Mexico",
+          "category": "travel",
+          "difficulty": "easy",
+          "complexity": "easy",
+          "target": 1,
+          "partialReward": 200000,
+          "bounty": 200000,
+          "agent_note": "South border flight",
+          "metric": "count",
+          "log_pattern": "You travelled to Mexico",
+          "log_patterns": [
+            {
+              "key": "pat_co-3_1",
+              "template": "You travelled to Mexico"
+            }
+          ],
+          "current": 0
+        },
+        {
+          "id": 4,
+          "objId": "co-4",
+          "title": "Travel to 3 different foreign countries",
+          "category": "travel",
+          "difficulty": "medium",
+          "complexity": "medium",
+          "target": 3,
+          "partialReward": 500000,
+          "bounty": 500000,
+          "agent_note": "Distinct destinations",
+          "metric": "distinct",
+          "log_pattern": "You travelled to {country:word}",
+          "log_patterns": [
+            {
+              "key": "pat_co-4_1",
+              "template": "You travelled to {country:word}"
+            }
+          ],
+          "current": 0
+        },
+        {
+          "id": 5,
+          "objId": "co-5",
+          "title": "Consume 5 medical items",
+          "category": "energy",
+          "difficulty": "easy",
+          "complexity": "easy",
+          "target": 5,
+          "partialReward": 200000,
+          "bounty": 200000,
+          "agent_note": "Morphine or First Aid",
+          "metric": "count",
+          "log_pattern": "You used a {item:text}",
+          "log_patterns": [
+            {
+              "key": "pat_co-5_1",
+              "template": "You used a {item:text}"
+            }
+          ],
+          "current": 0
+        },
+        {
+          "id": 6,
+          "objId": "co-6",
+          "title": "Use 5 Xanax",
+          "category": "energy",
+          "difficulty": "medium",
+          "complexity": "medium",
+          "target": 5,
+          "partialReward": 500000,
+          "bounty": 500000,
+          "agent_note": "Do not overdose",
+          "metric": "count",
+          "log_pattern": "You used some Xanax",
+          "log_patterns": [
+            {
+              "key": "pat_co-6_1",
+              "template": "You used some Xanax"
+            }
+          ],
+          "current": 0
+        },
+        {
+          "id": 7,
+          "objId": "co-7",
+          "title": "Buy an item from the market",
+          "category": "economy",
+          "difficulty": "easy",
+          "complexity": "easy",
+          "target": 1,
+          "partialReward": 200000,
+          "bounty": 200000,
+          "agent_note": "Any market item",
+          "metric": "count",
+          "log_pattern": "You bought {qty:int}x {item:text} from {seller:text}",
+          "log_patterns": [
+            {
+              "key": "pat_co-7_1",
+              "template": "You bought {qty:int}x {item:text} from {seller:text}"
+            }
+          ],
+          "current": 0
+        },
+        {
+          "id": 8,
+          "objId": "co-8",
+          "title": "Spend $2M on items or trades",
+          "category": "economy",
+          "difficulty": "medium",
+          "complexity": "medium",
+          "target": 2000000,
+          "partialReward": 500000,
+          "bounty": 500000,
+          "agent_note": "Accumulated spending",
+          "metric": "sum",
+          "log_pattern": "You spent ${amount:number} on {item:text}",
+          "log_patterns": [
+            {
+              "key": "pat_co-8_1",
+              "template": "You spent ${amount:number} on {item:text}"
+            }
+          ],
+          "current": 0
+        },
+        {
+          "id": 9,
+          "objId": "co-9",
+          "title": "Complete 3 crimes",
+          "category": "general",
+          "difficulty": "easy",
+          "complexity": "easy",
+          "target": 3,
+          "partialReward": 350000,
+          "bounty": 350000,
+          "agent_note": "Crimes 2.0",
+          "metric": "count",
+          "log_pattern": "You used {nerve:int} nerve successfully shoplifting from the {store:text} gaining {items:text}\nYou used {nerve:int} nerve successfully responding to a {scam:text}",
+          "log_patterns": [
+            {
+              "key": "pat_co-9_1",
+              "template": "You used {nerve:int} nerve successfully shoplifting from the {store:text} gaining {items:text}"
+            },
+            {
+              "key": "pat_co-9_2",
+              "template": "You used {nerve:int} nerve successfully responding to a {scam:text}"
+            }
+          ],
+          "current": 0
+        },
+        {
+          "id": 10,
+          "objId": "co-10",
+          "title": "Defeat 25 players in attacks",
+          "category": "combat",
+          "difficulty": "hard",
+          "complexity": "hard",
+          "target": 25,
+          "partialReward": 1000000,
+          "bounty": 1000000,
+          "agent_note": "Chain attacks",
+          "metric": "count",
+          "log_pattern": "You used {energy:int} energy attacking {opponent:text} and defeated them",
+          "log_patterns": [
+            {
+              "key": "pat_co-10_1",
+              "template": "You used {energy:int} energy attacking {opponent:text} and defeated them"
+            }
+          ],
+          "current": 0
+        }
+      ]
     }
   ],
   "objective_definitions": [
@@ -387,6 +625,216 @@
       "partial_reward": 1000000,
       "verification_status": "active",
       "created_at": "2026-10-07T01:27:03.546Z"
+    },
+    {
+      "id": "co-2007-1-4355",
+      "contract_id": 2007,
+      "objective_definition_id": "def-14",
+      "objective_order": 1,
+      "title": "Donate to your faction",
+      "name": "Donate to your faction",
+      "category": "faction",
+      "difficulty": "easy",
+      "complexity": "easy",
+      "target_value": 1,
+      "partial_reward": 200000,
+      "bounty": 200000,
+      "agent_note": "",
+      "verification": "log",
+      "metric": "count",
+      "log_patterns": [],
+      "verification_status": "active",
+      "version": 1,
+      "created_at": "2026-10-14T06:35:54.355Z"
+    },
+    {
+      "id": "co-2007-2-4356",
+      "contract_id": 2007,
+      "objective_definition_id": "def-6",
+      "objective_order": 2,
+      "title": "Use 5 medical items",
+      "name": "Use 5 medical items",
+      "category": "energy",
+      "difficulty": "easy",
+      "complexity": "easy",
+      "target_value": 5,
+      "partial_reward": 200000,
+      "bounty": 200000,
+      "agent_note": "",
+      "verification": "log",
+      "metric": "count",
+      "log_patterns": [],
+      "verification_status": "active",
+      "version": 1,
+      "created_at": "2026-10-14T06:35:54.356Z"
+    },
+    {
+      "id": "co-2007-3-4356",
+      "contract_id": 2007,
+      "objective_definition_id": "def-5",
+      "objective_order": 3,
+      "title": "Complete 3 crimes",
+      "name": "Complete 3 crimes",
+      "category": "general",
+      "difficulty": "easy",
+      "complexity": "easy",
+      "target_value": 3,
+      "partial_reward": 350000,
+      "bounty": 350000,
+      "agent_note": "",
+      "verification": "log",
+      "metric": "count",
+      "log_patterns": [],
+      "verification_status": "active",
+      "version": 1,
+      "created_at": "2026-10-14T06:35:54.356Z"
+    },
+    {
+      "id": "co-2007-4-4356",
+      "contract_id": 2007,
+      "objective_definition_id": "def-3",
+      "objective_order": 4,
+      "title": "Lose 5 attacks",
+      "name": "Lose 5 attacks",
+      "category": "combat",
+      "difficulty": "easy",
+      "complexity": "easy",
+      "target_value": 5,
+      "partial_reward": 250000,
+      "bounty": 250000,
+      "agent_note": "",
+      "verification": "log",
+      "metric": "count",
+      "log_patterns": [],
+      "verification_status": "active",
+      "version": 1,
+      "created_at": "2026-10-14T06:35:54.356Z"
+    },
+    {
+      "id": "co-2007-5-4356",
+      "contract_id": 2007,
+      "objective_definition_id": "def-1",
+      "objective_order": 5,
+      "title": "Use 1,500 Energy",
+      "name": "Use 1,500 Energy",
+      "category": "energy",
+      "difficulty": "medium",
+      "complexity": "medium",
+      "target_value": 1500,
+      "partial_reward": 500000,
+      "bounty": 500000,
+      "agent_note": "",
+      "verification": "log",
+      "metric": "count",
+      "log_patterns": [],
+      "verification_status": "active",
+      "version": 1,
+      "created_at": "2026-10-14T06:35:54.356Z"
+    },
+    {
+      "id": "co-2007-6-4356",
+      "contract_id": 2007,
+      "objective_definition_id": "def-8",
+      "objective_order": 6,
+      "title": "Make 10 successful attacks",
+      "name": "Make 10 successful attacks",
+      "category": "combat",
+      "difficulty": "medium",
+      "complexity": "medium",
+      "target_value": 10,
+      "partial_reward": 750000,
+      "bounty": 750000,
+      "agent_note": "",
+      "verification": "log",
+      "metric": "count",
+      "log_patterns": [],
+      "verification_status": "active",
+      "version": 1,
+      "created_at": "2026-10-14T06:35:54.356Z"
+    },
+    {
+      "id": "co-2007-7-4356",
+      "contract_id": 2007,
+      "objective_definition_id": "def-7",
+      "objective_order": 7,
+      "title": "Travel to 3 different countries",
+      "name": "Travel to 3 different countries",
+      "category": "travel",
+      "difficulty": "medium",
+      "complexity": "medium",
+      "target_value": 3,
+      "partial_reward": 500000,
+      "bounty": 500000,
+      "agent_note": "",
+      "verification": "log",
+      "metric": "count",
+      "log_patterns": [],
+      "verification_status": "active",
+      "version": 1,
+      "created_at": "2026-10-14T06:35:54.356Z"
+    },
+    {
+      "id": "co-2007-8-4356",
+      "contract_id": 2007,
+      "objective_definition_id": "def-11",
+      "objective_order": 8,
+      "title": "Hospitalize 10 players",
+      "name": "Hospitalize 10 players",
+      "category": "combat",
+      "difficulty": "hard",
+      "complexity": "hard",
+      "target_value": 10,
+      "partial_reward": 800000,
+      "bounty": 800000,
+      "agent_note": "",
+      "verification": "log",
+      "metric": "count",
+      "log_patterns": [],
+      "verification_status": "active",
+      "version": 1,
+      "created_at": "2026-10-14T06:35:54.356Z"
+    },
+    {
+      "id": "co-2007-9-4356",
+      "contract_id": 2007,
+      "objective_definition_id": "def-10",
+      "objective_order": 9,
+      "title": "Gain 5,000 faction respect",
+      "name": "Gain 5,000 faction respect",
+      "category": "faction",
+      "difficulty": "hard",
+      "complexity": "hard",
+      "target_value": 5000,
+      "partial_reward": 1000000,
+      "bounty": 1000000,
+      "agent_note": "",
+      "verification": "log",
+      "metric": "count",
+      "log_patterns": [],
+      "verification_status": "active",
+      "version": 1,
+      "created_at": "2026-10-14T06:35:54.356Z"
+    },
+    {
+      "id": "co-2007-10-4356",
+      "contract_id": 2007,
+      "objective_definition_id": "def-4",
+      "objective_order": 10,
+      "title": "Defeat a player 5+ levels above you",
+      "name": "Defeat a player 5+ levels above you",
+      "category": "combat",
+      "difficulty": "extreme",
+      "complexity": "extreme",
+      "target_value": 1,
+      "partial_reward": 1000000,
+      "bounty": 1000000,
+      "agent_note": "",
+      "verification": "log",
+      "metric": "count",
+      "log_patterns": [],
+      "verification_status": "active",
+      "version": 1,
+      "created_at": "2026-10-14T06:35:54.356Z"
     }
   ],
   "contract_participants": [
@@ -1365,6 +1813,54 @@
     }
   ],
   "admin_audit_logs": [
+    {
+      "id": "log-1791947305244",
+      "admin_id": "usr-admin-1",
+      "admin_name": "Admin Overseer",
+      "action": "Updated Contract Properties",
+      "entity_type": "contract",
+      "entity_id": "#1847",
+      "details": "Modified contract configuration.",
+      "ip": "127.0.0.1",
+      "created_at": "08:38 am",
+      "tone": "normal"
+    },
+    {
+      "id": "log-1791947283879",
+      "admin_id": "usr-admin-1",
+      "admin_name": "Admin Overseer",
+      "action": "Updated Contract Properties",
+      "entity_type": "contract",
+      "entity_id": "#1847",
+      "details": "Modified contract configuration.",
+      "ip": "127.0.0.1",
+      "created_at": "08:38 am",
+      "tone": "normal"
+    },
+    {
+      "id": "log-1791944018780",
+      "admin_id": "usr-admin-1",
+      "admin_name": "Admin Overseer",
+      "action": "Paused Contract",
+      "entity_type": "contract",
+      "entity_id": "#1847",
+      "details": "Contract temporarily paused.",
+      "ip": "127.0.0.1",
+      "created_at": "07:43 am",
+      "tone": "warning"
+    },
+    {
+      "id": "log-1791944018765",
+      "admin_id": "usr-admin-1",
+      "admin_name": "Admin Overseer",
+      "action": "Updated Contract Properties",
+      "entity_type": "contract",
+      "entity_id": "#1847",
+      "details": "Modified contract configuration.",
+      "ip": "127.0.0.1",
+      "created_at": "07:43 am",
+      "tone": "normal"
+    },
     {
       "id": "log-1791337423820",
       "admin_id": "usr-admin-1",

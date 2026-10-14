@@ -13,15 +13,23 @@ export interface User {
   role: 'agent' | 'admin'
 }
 
+import type { StoredLogPattern } from './patterns.ts'
+
 export interface ObjectiveDefinition {
   id: string
   obj_code: string
   name: string
   category: 'combat' | 'travel' | 'energy' | 'economy' | 'general' | 'faction'
   difficulty: 'easy' | 'medium' | 'hard' | 'extreme'
+  complexity?: 'easy' | 'medium' | 'hard' | 'extreme'
   default_target: number
   default_partial_reward: number
+  bounty?: number
+  agent_note?: string
   verification_method: string
+  verification?: 'log' | 'manual'
+  metric?: 'count' | 'sum' | 'distinct'
+  log_patterns?: StoredLogPattern[]
   eligible_for_rng: boolean
   is_active: boolean
 }
@@ -32,11 +40,19 @@ export interface ContractObjective {
   objective_definition_id: string
   objective_order: number
   title: string
+  name?: string
   category: 'combat' | 'travel' | 'energy' | 'economy' | 'general' | 'faction'
   difficulty: 'easy' | 'medium' | 'hard' | 'extreme'
+  complexity?: 'easy' | 'medium' | 'hard' | 'extreme'
   target_value: number
   partial_reward: number // e.g. $500,000 per objective
+  bounty?: number
+  agent_note?: string
+  metric?: 'count' | 'sum' | 'distinct'
+  verification?: 'log' | 'manual'
+  log_patterns?: StoredLogPattern[]
   verification_status: 'active' | 'quarantined' | 'replaced'
+  version?: number
   created_at: string
 }
 
@@ -246,21 +262,274 @@ class Database {
 
   private getSeedData(): DatabaseSchema {
     const defaultObjectiveDefinitions: ObjectiveDefinition[] = [
-      { id: 'def-1', obj_code: 'OBJ-001', name: 'Use 1,500 Energy', category: 'energy', difficulty: 'medium', default_target: 1500, default_partial_reward: 500000, verification_method: 'TORN API / User Stats', eligible_for_rng: true, is_active: true },
-      { id: 'def-2', obj_code: 'OBJ-002', name: 'Fly to Switzerland twice', category: 'travel', difficulty: 'hard', default_target: 2, default_partial_reward: 750000, verification_method: 'TORN API / Travel', eligible_for_rng: true, is_active: true },
-      { id: 'def-3', obj_code: 'OBJ-003', name: 'Lose 5 attacks', category: 'combat', difficulty: 'easy', default_target: 5, default_partial_reward: 250000, verification_method: 'TORN API / Attacks', eligible_for_rng: true, is_active: true },
-      { id: 'def-4', obj_code: 'OBJ-004', name: 'Defeat a player 5+ levels above you', category: 'combat', difficulty: 'extreme', default_target: 1, default_partial_reward: 1000000, verification_method: 'TORN API / Battle Log', eligible_for_rng: true, is_active: true },
-      { id: 'def-5', obj_code: 'OBJ-005', name: 'Complete 3 crimes', category: 'general', difficulty: 'easy', default_target: 3, default_partial_reward: 350000, verification_method: 'TORN API / Crimes 2.0', eligible_for_rng: true, is_active: true },
-      { id: 'def-6', obj_code: 'OBJ-006', name: 'Use 5 medical items', category: 'energy', difficulty: 'easy', default_target: 5, default_partial_reward: 200000, verification_method: 'TORN API / Items', eligible_for_rng: true, is_active: true },
-      { id: 'def-7', obj_code: 'OBJ-007', name: 'Travel to 3 different countries', category: 'travel', difficulty: 'medium', default_target: 3, default_partial_reward: 500000, verification_method: 'TORN API / Travel', eligible_for_rng: true, is_active: true },
-      { id: 'def-8', obj_code: 'OBJ-008', name: 'Make 10 successful attacks', category: 'combat', difficulty: 'medium', default_target: 10, default_partial_reward: 750000, verification_method: 'TORN API / Attacks', eligible_for_rng: true, is_active: true },
-      { id: 'def-9', obj_code: 'OBJ-009', name: 'Sell an item through the item market', category: 'economy', difficulty: 'easy', default_target: 1, default_partial_reward: 300000, verification_method: 'TORN API / Market', eligible_for_rng: true, is_active: true },
-      { id: 'def-10', obj_code: 'OBJ-010', name: 'Gain 5,000 faction respect', category: 'faction', difficulty: 'hard', default_target: 5000, default_partial_reward: 1000000, verification_method: 'TORN API / Respect', eligible_for_rng: true, is_active: true },
-      // Pool overflow
-      { id: 'def-11', obj_code: 'OBJ-011', name: 'Hospitalize 10 players', category: 'combat', difficulty: 'hard', default_target: 10, default_partial_reward: 800000, verification_method: 'TORN API / Attacks', eligible_for_rng: true, is_active: true },
-      { id: 'def-12', obj_code: 'OBJ-012', name: 'Spend $2M in market', category: 'economy', difficulty: 'medium', default_target: 2000000, default_partial_reward: 500000, verification_method: 'TORN API / Money', eligible_for_rng: true, is_active: true },
-      { id: 'def-13', obj_code: 'OBJ-013', name: 'Train 1,000 stat points', category: 'general', difficulty: 'medium', default_target: 1000, default_partial_reward: 500000, verification_method: 'TORN API / Gym', eligible_for_rng: true, is_active: true },
-      { id: 'def-14', obj_code: 'OBJ-014', name: 'Donate to your faction', category: 'faction', difficulty: 'easy', default_target: 1, default_partial_reward: 200000, verification_method: 'TORN API / Faction', eligible_for_rng: true, is_active: true },
+      {
+        id: 'def-1',
+        obj_code: 'OBJ-001',
+        name: 'Use 1,500 Energy',
+        category: 'energy',
+        difficulty: 'medium',
+        complexity: 'medium',
+        default_target: 1500,
+        default_partial_reward: 500000,
+        bounty: 500000,
+        agent_note: 'Counts energy spent training in the gym or attacking opponents.',
+        verification_method: 'TORN API / Logs',
+        verification: 'log',
+        metric: 'sum',
+        log_patterns: [
+          {
+            key: 'gym_train',
+            label: 'Gym Training',
+            mode: 'template',
+            template: 'You used {energy:int} energy and {happiness:int} happiness training your {stat:word} {times:int} times in {gym:text} increasing it by {gain:number} to {total:number}',
+            value_capture: 'energy',
+            conditions: [],
+          },
+          {
+            key: 'attack_energy',
+            label: 'Attack Energy',
+            mode: 'template',
+            template: 'You used {energy:int} energy attacking {opponent:text} and {result:text}',
+            value_capture: 'energy',
+            conditions: [],
+          },
+        ],
+        eligible_for_rng: true,
+        is_active: true,
+      },
+      {
+        id: 'def-2',
+        obj_code: 'OBJ-002',
+        name: 'Fly to Switzerland twice',
+        category: 'travel',
+        difficulty: 'hard',
+        complexity: 'hard',
+        default_target: 2,
+        default_partial_reward: 750000,
+        bounty: 750000,
+        agent_note: 'Travel to Switzerland and touch down.',
+        verification_method: 'TORN API / Travel Logs',
+        verification: 'log',
+        metric: 'count',
+        log_patterns: [
+          {
+            key: 'travel_switzerland',
+            label: 'Travel to Switzerland',
+            mode: 'template',
+            template: 'You traveled to Switzerland',
+            conditions: [],
+          },
+        ],
+        eligible_for_rng: true,
+        is_active: true,
+      },
+      {
+        id: 'def-3',
+        obj_code: 'OBJ-003',
+        name: 'Lose 5 attacks',
+        category: 'combat',
+        difficulty: 'easy',
+        complexity: 'easy',
+        default_target: 5,
+        default_partial_reward: 250000,
+        bounty: 250000,
+        agent_note: 'Engage in combat and lose or get defeated.',
+        verification_method: 'TORN API / Combat Logs',
+        verification: 'log',
+        metric: 'count',
+        log_patterns: [
+          {
+            key: 'attack_loss',
+            label: 'Attack Lost',
+            mode: 'template',
+            template: 'You used {energy:int} energy attacking {opponent:text} and lost to them',
+            conditions: [],
+          },
+        ],
+        eligible_for_rng: true,
+        is_active: true,
+      },
+      {
+        id: 'def-4',
+        obj_code: 'OBJ-004',
+        name: 'Defeat a player 5+ levels above you',
+        category: 'combat',
+        difficulty: 'extreme',
+        complexity: 'extreme',
+        default_target: 1,
+        default_partial_reward: 1000000,
+        bounty: 1000000,
+        agent_note: 'Requires manual verification or enriched API check.',
+        verification_method: 'TORN API / Battle Log',
+        verification: 'manual',
+        metric: 'count',
+        log_patterns: [],
+        eligible_for_rng: true,
+        is_active: true,
+      },
+      {
+        id: 'def-5',
+        obj_code: 'OBJ-005',
+        name: 'Complete 3 crimes',
+        category: 'general',
+        difficulty: 'easy',
+        complexity: 'easy',
+        default_target: 3,
+        default_partial_reward: 350000,
+        bounty: 350000,
+        agent_note: 'Successful crime executions in Crimes 2.0.',
+        verification_method: 'TORN API / Crime Logs',
+        verification: 'log',
+        metric: 'count',
+        log_patterns: [
+          {
+            key: 'crime_shoplift',
+            label: 'Crime Shoplift',
+            mode: 'template',
+            template: 'You used {nerve:int} nerve successfully shoplifting from the {store:text} gaining {items:text}',
+            conditions: [],
+          },
+          {
+            key: 'crime_scam',
+            label: 'Crime Scam Delivery',
+            mode: 'template',
+            template: 'You used {nerve:int} nerve successfully responding to a {scam:text}',
+            conditions: [],
+          },
+          {
+            key: 'crime_success',
+            label: 'Crime Success',
+            mode: 'template',
+            template: 'You committed a crime: {action:text}',
+            conditions: [],
+          },
+        ],
+        eligible_for_rng: true,
+        is_active: true,
+      },
+      {
+        id: 'def-6',
+        obj_code: 'OBJ-006',
+        name: 'Use 5 medical items',
+        category: 'energy',
+        difficulty: 'easy',
+        complexity: 'easy',
+        default_target: 5,
+        default_partial_reward: 200000,
+        bounty: 200000,
+        agent_note: 'First aid kits, morphine, or blood bags.',
+        verification_method: 'TORN API / Item Logs',
+        verification: 'log',
+        metric: 'count',
+        log_patterns: [
+          {
+            key: 'med_use',
+            label: 'Medical Item Used',
+            mode: 'template',
+            template: 'You used a {item:text} gaining {life:int} life',
+            conditions: [],
+          },
+        ],
+        eligible_for_rng: true,
+        is_active: true,
+      },
+      {
+        id: 'def-7',
+        obj_code: 'OBJ-007',
+        name: 'Travel to 3 different countries',
+        category: 'travel',
+        difficulty: 'medium',
+        complexity: 'medium',
+        default_target: 3,
+        default_partial_reward: 500000,
+        bounty: 500000,
+        agent_note: 'Must visit 3 distinct international locations.',
+        verification_method: 'TORN API / Travel Logs',
+        verification: 'log',
+        metric: 'distinct',
+        log_patterns: [
+          {
+            key: 'travel_country',
+            label: 'Country Arrival',
+            mode: 'template',
+            template: 'You traveled to {country:word}',
+            value_capture: 'country',
+            conditions: [],
+          },
+        ],
+        eligible_for_rng: true,
+        is_active: true,
+      },
+      {
+        id: 'def-8',
+        obj_code: 'OBJ-008',
+        name: 'Make 10 successful attacks',
+        category: 'combat',
+        difficulty: 'medium',
+        complexity: 'medium',
+        default_target: 10,
+        default_partial_reward: 750000,
+        bounty: 750000,
+        agent_note: 'Only attacks you win count. Losses and escapes don\'t.',
+        verification_method: 'TORN API / Attack Logs',
+        verification: 'log',
+        metric: 'count',
+        log_patterns: [
+          {
+            key: 'attack_win',
+            label: 'Attack, Won',
+            mode: 'template',
+            template: 'You used {energy:int} energy attacking {opponent:text} and defeated them',
+            conditions: [],
+          },
+        ],
+        eligible_for_rng: true,
+        is_active: true,
+      },
+      {
+        id: 'def-9',
+        obj_code: 'OBJ-009',
+        name: 'Sell an item through the item market',
+        category: 'economy',
+        difficulty: 'easy',
+        complexity: 'easy',
+        default_target: 1,
+        default_partial_reward: 300000,
+        bounty: 300000,
+        agent_note: 'Item market or bazaar sale.',
+        verification_method: 'TORN API / Market Logs',
+        verification: 'log',
+        metric: 'count',
+        log_patterns: [
+          {
+            key: 'bazaar_buy',
+            label: 'Bazaar Sale',
+            mode: 'template',
+            template: 'You bought items from bazaar seller {seller:int}',
+            conditions: [],
+          },
+        ],
+        eligible_for_rng: true,
+        is_active: true,
+      },
+      {
+        id: 'def-10',
+        obj_code: 'OBJ-010',
+        name: 'Gain 5,000 faction respect',
+        category: 'faction',
+        difficulty: 'hard',
+        complexity: 'hard',
+        default_target: 5000,
+        default_partial_reward: 1000000,
+        bounty: 1000000,
+        agent_note: 'Requires faction war or chain respect tracking.',
+        verification_method: 'TORN API / Respect',
+        verification: 'manual',
+        metric: 'count',
+        log_patterns: [],
+        eligible_for_rng: true,
+        is_active: true,
+      },
     ]
 
     const defaultContract: Contract = {
@@ -297,11 +566,19 @@ class Database {
       objective_definition_id: def.id,
       objective_order: idx + 1,
       title: def.name,
+      name: def.name,
       category: def.category,
       difficulty: def.difficulty,
+      complexity: def.complexity || def.difficulty,
       target_value: def.default_target,
       partial_reward: def.default_partial_reward,
+      bounty: def.bounty || def.default_partial_reward,
+      agent_note: def.agent_note || '',
+      verification: def.verification || 'log',
+      metric: def.metric || 'count',
+      log_patterns: def.log_patterns || [],
       verification_status: 'active',
+      version: 1,
       created_at: new Date().toISOString(),
     }))
 

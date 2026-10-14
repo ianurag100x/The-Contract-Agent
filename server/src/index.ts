@@ -1,6 +1,7 @@
 import http from 'node:http'
 import { parse as parseUrl } from 'node:url'
 import { handleApiRoute } from './routes.ts'
+import { sqliteDb } from './sqlite.ts'
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3001
 
@@ -77,5 +78,50 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   console.log(`[The Contract Agent] Backend API server running at http://localhost:${PORT}`)
-  console.log(`[The Contract Agent] Verification Engine & Partial Award System active.`)
+  console.log(`[The Contract Agent] Verification Engine & Contract Scheduler active.`)
+
+  // Background World Clock Scheduler: checks for scheduled contracts reaching starts_at
+  setInterval(() => {
+    try {
+      const now = Date.now()
+      const scheduledList = sqliteDb.prepare("SELECT * FROM contracts WHERE status = 'scheduled'").all() as any[]
+
+      for (const sc of scheduledList) {
+        const startTime = new Date(sc.starts_at).getTime()
+        // If start time is reached or past
+        if (!isNaN(startTime) && startTime <= now) {
+          console.log(`[Scheduler] World clock reached start time for Contract #${sc.id}. Auto-activating contract...`)
+
+          // Mark any current active/paused contract as completed
+          sqliteDb.prepare(`
+            UPDATE contracts
+            SET status = 'completed', completed_at = datetime('now')
+            WHERE status IN ('active', 'paused') AND id != ?
+          `).run(sc.id)
+
+          // Auto-activate the scheduled contract
+          sqliteDb.prepare(`
+            UPDATE contracts
+            SET status = 'active'
+            WHERE id = ?
+          `).run(sc.id)
+
+          // Ensure active agents have participant records
+          const activeUsers = sqliteDb.prepare("SELECT * FROM users WHERE status = 'active'").all() as any[]
+          const insertPart = sqliteDb.prepare(`
+            INSERT OR IGNORE INTO contract_participants (
+              id, contract_id, user_id, torn_user_id, torn_username, status, current_rank, progress, total_objectives, partial_rewards_earned, last_activity_at
+            ) VALUES (?, ?, ?, ?, ?, 'active', 1, 0, ?, 0, 'Just now')
+          `)
+          activeUsers.forEach((u: any) => {
+            insertPart.run(`part-${sc.id}-${u.id}`, sc.id, u.id, u.torn_user_id, u.torn_username, sc.max_objectives || 10)
+          })
+
+          console.log(`[Scheduler] Contract #${sc.id} is now ACTIVE and published to all agents.`)
+        }
+      }
+    } catch (e) {
+      // Ignore background ticker errors
+    }
+  }, 10_000)
 })

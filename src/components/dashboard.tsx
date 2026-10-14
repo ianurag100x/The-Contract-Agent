@@ -26,8 +26,7 @@ import {
   type AchievementIcon,
   type ActivityKind,
 } from '../data/agent'
-import { dashboardApi } from '../lib/api'
-import { standings } from '../data/mock'
+import { contractApi, dashboardApi } from '../lib/api'
 import { useNow } from '../hooks/useNow'
 import { hm, hms } from '../lib/format'
 import { contractTypeMeta } from '../lib/meta'
@@ -48,14 +47,33 @@ function Tile({ label, children }: { label: string; children: ReactNode }) {
 
 export function ContractHero() {
   const { started, setStarted } = useContractState()
-  const { contract } = useAdmin()
+  const { contract: adminContract } = useAdmin()
+  const [activeData, setActiveData] = useState<any>(null)
+
+  const loadData = () => {
+    contractApi.getActive().then((res) => {
+      if (res) setActiveData(res)
+    })
+  }
+
+  useEffect(() => {
+    loadData()
+    const interval = setInterval(loadData, 3000)
+    return () => clearInterval(interval)
+  }, [])
+
   const now = useNow()
-  const remaining = Math.max(0, contract.endsAt - now)
-  const type = contractTypeMeta[contract.type] || contractTypeMeta.standard
-  const total = contract.objectives.length
-  const done = contract.objectives.filter((o) => o.current >= o.target).length
-  const leader = standings[0]
-  const you = standings.find((s) => s.isYou) || { rank: 14 }
+  const contract = activeData?.contract || adminContract
+  const remaining = contract.status === 'paused'
+    ? (contract.remainingMs !== undefined ? contract.remainingMs : Math.max(0, (contract.endsAt || 0) - now))
+    : Math.max(0, (contract.endsAt || 0) - now)
+  const type = contractTypeMeta[contract.type as keyof typeof contractTypeMeta] || contractTypeMeta.standard
+  const total = contract.objectives?.length || 10
+  const participant = activeData?.participant
+  const done = participant?.progress ?? contract.objectives?.filter((o: any) => o.current >= o.target).length ?? 0
+  const standingsList: any[] = activeData?.standings || []
+  const leader = standingsList.length > 0 ? standingsList[0] : null
+  const you = standingsList.find((s) => s.isYou) || { rank: 1 }
 
   if (!started) {
     return (
@@ -102,17 +120,40 @@ export function ContractHero() {
     )
   }
 
+  const isPaused = contract.status === 'paused'
+  const isCancelled = contract.status === 'cancelled'
+  const isCompleted = contract.status === 'completed'
+
   return (
     <Card className="p-5 sm:p-6">
-      <Pill tone="accent">
-        <span aria-hidden className="size-1.5 rounded-full bg-accent" />
-        {type.label.toUpperCase()} • ACTIVE
-      </Pill>
+      <div className="flex items-center gap-2">
+        {isPaused ? (
+          <Pill tone="hard">
+            <span aria-hidden className="size-1.5 rounded-full bg-hard" />
+            PAUSED
+          </Pill>
+        ) : isCancelled ? (
+          <Pill tone="extreme">
+            <span aria-hidden className="size-1.5 rounded-full bg-extreme" />
+            CANCELLED
+          </Pill>
+        ) : isCompleted ? (
+          <Pill>
+            <span aria-hidden className="size-1.5 rounded-full bg-fg" />
+            COMPLETED
+          </Pill>
+        ) : (
+          <Pill tone="accent">
+            <span aria-hidden className="size-1.5 rounded-full bg-accent" />
+            {type.label.toUpperCase()} • ACTIVE
+          </Pill>
+        )}
+      </div>
       <h2 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
         Contract #{contract.number}
       </h2>
       <p className="mt-1 text-sm text-muted">
-        One contract. Ten objectives. One winner.
+        {isPaused ? 'Contract is temporarily paused by administration.' : isCancelled ? 'This contract has been cancelled.' : isCompleted ? `Contract ended. Winner: ${contract.declaredWinner || 'None'}` : 'One contract. Ten objectives. One winner.'}
       </p>
 
       <div className="mt-5 grid gap-3 sm:grid-cols-2">
@@ -124,9 +165,9 @@ export function ContractHero() {
             <SegmentedBar done={done} total={total} />
           </div>
         </Tile>
-        <Tile label="Time Remaining">
+        <Tile label={isPaused ? "Time (PAUSED)" : "Time Remaining"}>
           <p className="tabular text-3xl font-semibold tracking-tight">
-            {hms(remaining)}
+            {isPaused ? 'PAUSED' : hms(remaining)}
           </p>
         </Tile>
         <Tile label="Current Position">
@@ -136,10 +177,10 @@ export function ContractHero() {
         </Tile>
         <Tile label="Current Leader">
           <p className="truncate text-3xl font-semibold tracking-tight">
-            {leader.name}
+            {leader ? leader.name : '—'}
           </p>
           <p className="tabular mt-0.5 text-xs text-muted">
-            {leader.completed}/{total} objectives
+            {leader ? `${leader.completed}/${total} objectives` : 'No leader yet'}
           </p>
         </Tile>
       </div>

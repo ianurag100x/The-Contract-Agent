@@ -1,25 +1,49 @@
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ChevronLeft, Trophy } from 'lucide-react'
 import ObjectiveList from '../components/ObjectiveList'
 import { Card, PageHeader, Pill } from '../components/ui'
-import { archive } from '../data/mock'
+import { archiveApi } from '../lib/api'
 import { duration } from '../lib/format'
 import { contractTypeMeta } from '../lib/meta'
+import type { ContractType } from '../types'
 
 export default function ArchiveDetailPage() {
   const { number } = useParams()
-  const entry = archive.find((e) => String(e.number) === number)
+  const [entry, setEntry] = useState<any | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    archiveApi.getHistory().then((list) => {
+      if (list && Array.isArray(list)) {
+        const found = list.find((e: any) => String(e.number) === number)
+        setEntry(found || null)
+      } else {
+        setEntry(null)
+      }
+      setLoading(false)
+    })
+  }, [number])
+
+  if (loading) {
+    return (
+      <>
+        <BackLink />
+        <p className="mt-4 text-muted">Loading contract archive...</p>
+      </>
+    )
+  }
 
   if (!entry) {
     return (
       <>
         <BackLink />
-        <p className="text-muted">Contract not found.</p>
+        <p className="mt-4 text-muted">Contract #{number} not found in archive.</p>
       </>
     )
   }
 
-  const type = contractTypeMeta[entry.type]
+  const type = contractTypeMeta[entry.type as ContractType] || contractTypeMeta.standard
 
   return (
     <>
@@ -41,19 +65,19 @@ export default function ArchiveDetailPage() {
         <div className="px-5 py-3.5">
           <dt className="text-xs text-muted">Completed after release</dt>
           <dd className="tabular mt-1 text-lg font-semibold">
-            {duration(entry.minutes)}
+            {duration(entry.minutes || 0)}
           </dd>
         </div>
         <div className="px-5 py-3.5">
           <dt className="text-xs text-muted">Agents</dt>
           <dd className="tabular mt-1 text-lg font-semibold">
-            {entry.participants.toLocaleString('en-US')}
+            {(entry.participants || 0).toLocaleString('en-US')}
           </dd>
         </div>
       </dl>
 
       <Card title="Objectives">
-        <ObjectiveList objectives={entry.objectives} />
+        <ObjectiveList objectives={entry.objectives || []} />
       </Card>
     </>
   )

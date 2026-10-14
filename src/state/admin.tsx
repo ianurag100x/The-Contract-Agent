@@ -225,26 +225,49 @@ export interface AdminContractSettings {
   endsAt: number
   participants: number
   rewards: Reward[]
-  objectives: (Objective & { partialReward?: number })[]
+  objectives: Objective[]
+  maxObjectives?: number
   partialRewardsEnabled?: boolean
   partialRewardPerObjective?: number
   winnerStatus?: 'Awaiting Final Verification' | 'Verified Winner' | 'Reward Distributed'
   declaredWinner?: string
+  remainingMs?: number
+}
+
+export interface AdminPlatformStats {
+  registeredUsers: number
+  activeUsers: number
+  activeContractors: number
+  contractsCompleted: number
+  totalRewardsDistributed: string
 }
 
 interface AdminContextType {
-  // Contract
+  // Platform Statistics
+  stats: AdminPlatformStats
+  refreshStats: () => Promise<void>
+
+  // Contract & Tasks Management
   contract: AdminContractSettings
+  contractsList: any[]
+  refreshContracts: () => Promise<void>
+  selectContract: (id: number) => void
   updateStatus: (status: AdminContractStatus) => void
   updateType: (type: ContractType) => void
   updateWinnerConfig: (winnerConfig: WinnerConfig) => void
   updateContractNumber: (num: number) => void
   updateRewards: (rewards: Reward[]) => void
-  updateObjectives: (objectives: (Objective & { partialReward?: number })[]) => void
+  updateObjectives: (objectives: Objective[]) => void
+  updateMaxObjectives: (max: number) => void
   togglePartialRewards: (enabled: boolean) => void
   createContract: (newContract: Partial<AdminContractSettings>) => void
 
-  // Objectives
+  // Task CRUD in Contract (Req 5, 6, 7)
+  addObjectiveToContract: (newObj: Omit<Objective, 'id' | 'current'> & { log_pattern?: string; log_patterns?: any[] }) => void
+  editObjectiveInContract: (index: number, updated: Partial<Objective>) => void
+  deleteObjectiveFromContract: (index: number) => void
+
+  // Objectives Library
   objectivePool: ObjectivePoolItem[]
   toggleObjectiveEnabled: (objId: string) => void
   updateObjectiveInPool: (objId: string, updated: Partial<ObjectivePoolItem>) => void
@@ -257,10 +280,15 @@ interface AdminContextType {
   pauseContract: () => void
   resumeContract: () => void
   extendDeadlineMinutes: (minutes: number) => void
-  endContract: () => void
+  endContract: (winnerName?: string) => void
   cancelContract: () => void
+  resetContractProgress: () => void
   invalidateContract: (reason?: string) => void
   declareWinner: (winnerName: string) => void
+
+  // Agent Progress, Overrides & Extra Bounty (Req 8)
+  manualOverrideTask: (userId: string, objectiveId: string, action: 'mark_completed' | 'mark_uncompleted' | 'reset' | 'delete', reason: string) => Promise<boolean>
+  addExtraBounty: (userId: string, amount: number, reason: string) => Promise<boolean>
 
   // Verification Queue
   verificationQueue: VerificationQueueItem[]
@@ -342,241 +370,29 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   })
 
   // Verification Queue
-  const [verificationQueue, setVerificationQueue] = useState<VerificationQueueItem[]>([
-    { id: 'vq-1', playerName: 'PlayerA', objectiveTitle: 'Use 1,500 Energy', objectiveId: 'OBJ-032', status: 'verified', timestamp: '2 sec ago', apiData: 'Energy spent: 1500 / 1500' },
-    { id: 'vq-2', playerName: 'PlayerD', objectiveTitle: 'Fly to Switzerland ×2', objectiveId: 'OBJ-024', status: 'processing', timestamp: '5 sec ago', apiData: 'Flight log check in progress' },
-    { id: 'vq-3', playerName: 'PlayerB', objectiveTitle: 'Lose 5 attacks', objectiveId: 'OBJ-002', status: 'verified', timestamp: '8 sec ago', apiData: 'Attacks lost: 5/5' },
-    { id: 'vq-4', playerName: 'PlayerC', objectiveTitle: 'Defeat level +5 player', objectiveId: 'OBJ-008', status: 'error', timestamp: '12 sec ago', apiData: 'API timeout connecting to Torn log' },
-    { id: 'vq-5', playerName: 'PlayerE', objectiveTitle: 'Travel to 3 countries', objectiveId: 'OBJ-022', status: 'pending', timestamp: '18 sec ago' },
-  ])
+  const [verificationQueue, setVerificationQueue] = useState<VerificationQueueItem[]>([])
 
   // Participants
-  const [participants, setParticipants] = useState<Participant[]>([
-    {
-      id: 'p-1',
-      name: 'PlayerA',
-      tornId: 1948201,
-      rank: 1,
-      completedCount: 9,
-      totalCount: 10,
-      partialRewardsEarned: 4500000,
-      lastActive: '10 sec ago',
-      status: 'active',
-      objectivesProgress: initialToday.objectives.map((o, idx) => ({
-        id: o.id,
-        title: o.title,
-        category: o.category,
-        difficulty: o.difficulty,
-        current: idx === 9 ? 4200 : o.target,
-        target: o.target,
-        partialReward: 500000,
-        partialRewardStatus: idx < 9 ? 'credited' : 'unearned',
-        verifiedAt: idx < 9 ? `${idx * 15 + 2}m after release` : undefined,
-        apiEventId: idx < 9 ? `EVT-849${idx}` : undefined,
-      })),
-    },
-    {
-      id: 'p-2',
-      name: 'PlayerD',
-      tornId: 2391048,
-      rank: 2,
-      completedCount: 9,
-      totalCount: 10,
-      partialRewardsEarned: 4500000,
-      lastActive: '31 sec ago',
-      status: 'active',
-      objectivesProgress: initialToday.objectives.map((o, idx) => ({
-        id: o.id,
-        title: o.title,
-        category: o.category,
-        difficulty: o.difficulty,
-        current: idx === 3 ? 0 : o.target,
-        target: o.target,
-        partialReward: 500000,
-        partialRewardStatus: idx !== 3 ? 'credited' : 'unearned',
-        verifiedAt: idx !== 3 ? `${idx * 18 + 5}m after release` : undefined,
-        apiEventId: idx !== 3 ? `EVT-992${idx}` : undefined,
-      })),
-    },
-    {
-      id: 'p-3',
-      name: 'PlayerB',
-      tornId: 1820491,
-      rank: 3,
-      completedCount: 8,
-      totalCount: 10,
-      partialRewardsEarned: 3800000,
-      lastActive: '1 min ago',
-      status: 'active',
-      objectivesProgress: initialToday.objectives.map((o, idx) => ({
-        id: o.id,
-        title: o.title,
-        category: o.category,
-        difficulty: o.difficulty,
-        current: idx >= 8 ? 0 : o.target,
-        target: o.target,
-        partialReward: 500000,
-        partialRewardStatus: idx < 8 ? 'credited' : 'unearned',
-        verifiedAt: idx < 8 ? `${idx * 20 + 8}m after release` : undefined,
-        apiEventId: idx < 8 ? `EVT-711${idx}` : undefined,
-      })),
-    },
-    {
-      id: 'p-14',
-      name: 'Anurag',
-      tornId: 2849102,
-      rank: 14,
-      completedCount: 6,
-      totalCount: 10,
-      partialRewardsEarned: 2850000,
-      lastActive: '2 min ago',
-      status: 'active',
-      objectivesProgress: initialToday.objectives.map((o, idx) => ({
-        id: o.id,
-        title: o.title,
-        category: o.category,
-        difficulty: o.difficulty,
-        current: o.current,
-        target: o.target,
-        partialReward: 500000,
-        partialRewardStatus: idx < 6 ? 'credited' : 'unearned',
-      })),
-    },
-    {
-      id: 'p-suspicious-1',
-      name: 'PlayerX',
-      tornId: 4401928,
-      rank: 4,
-      completedCount: 8,
-      totalCount: 10,
-      partialRewardsEarned: 4000000,
-      lastActive: '45 sec ago',
-      status: 'suspicious',
-      suspiciousReason: 'Completed 6 objectives within 12 seconds.',
-      objectivesProgress: initialToday.objectives.map((o, idx) => ({
-        id: o.id,
-        title: o.title,
-        category: o.category,
-        difficulty: o.difficulty,
-        current: idx < 8 ? o.target : 0,
-        target: o.target,
-        partialReward: 500000,
-        isSuspicious: idx >= 2 && idx <= 7,
-      })),
-    },
-  ])
+  const [participants, setParticipants] = useState<Participant[]>([])
 
   const [selectedParticipant, setSelectedParticipant] = useState<Participant | null>(null)
 
   // Registered Users Directory
-  const [users, setUsers] = useState<AdminUserRecord[]>([
-    {
-      id: 'usr-1',
-      name: 'PlayerA',
-      tornId: 1948201,
-      registeredDate: 'May 14, 2025',
-      lastActive: '10 sec ago',
-      status: 'active',
-      contractsEntered: 37,
-      contractsCompleted: 29,
-      wins: 8,
-      top3: 14,
-      completionRate: '78.4%',
-      contractHistory: [
-        { contractNumber: 1847, status: 'Active', rank: '#1', completionTime: '—' },
-        { contractNumber: 1846, status: 'Completed', rank: '#3', completionTime: '4h 11m' },
-        { contractNumber: 1845, status: 'Completed', rank: '#1', completionTime: '2h 32m' },
-      ],
-    },
-    {
-      id: 'usr-2',
-      name: 'PlayerB',
-      tornId: 1820491,
-      registeredDate: 'Jun 02, 2025',
-      lastActive: '1 min ago',
-      status: 'active',
-      contractsEntered: 32,
-      contractsCompleted: 24,
-      wins: 5,
-      top3: 11,
-      completionRate: '75.0%',
-      contractHistory: [
-        { contractNumber: 1847, status: 'Active', rank: '#3' },
-        { contractNumber: 1846, status: 'Completed', rank: '#1', completionTime: '3h 18m' },
-      ],
-    },
-    {
-      id: 'usr-3',
-      name: 'PlayerD',
-      tornId: 2391048,
-      registeredDate: 'Aug 19, 2025',
-      lastActive: '31 sec ago',
-      status: 'active',
-      contractsEntered: 28,
-      contractsCompleted: 21,
-      wins: 3,
-      top3: 9,
-      completionRate: '75.0%',
-      contractHistory: [
-        { contractNumber: 1847, status: 'Active', rank: '#2' },
-        { contractNumber: 1844, status: 'Completed', rank: '#2', completionTime: '3h 44m' },
-      ],
-    },
-    {
-      id: 'usr-4',
-      name: 'PlayerX',
-      tornId: 4401928,
-      registeredDate: 'Oct 01, 2026',
-      lastActive: '45 sec ago',
-      status: 'suspended',
-      contractsEntered: 4,
-      contractsCompleted: 3,
-      wins: 1,
-      top3: 2,
-      completionRate: '75.0%',
-      contractHistory: [
-        { contractNumber: 1847, status: 'Active', rank: '#4' },
-      ],
-    },
-  ])
+  const [users, setUsers] = useState<AdminUserRecord[]>([])
 
   const [selectedUser, setSelectedUser] = useState<AdminUserRecord | null>(null)
 
   // Rewards Ledger (Including Partial Awards)
-  const [rewardsHistory, setRewardsHistory] = useState<RewardRecord[]>([
-    { id: 'rw-1', contractNumber: 1847, recipient: 'PlayerA', tornId: 1948201, rank: '#1', reward: '$10,000,000 + 1× Xanax', rewardType: 'final_winner', amountCash: 10000000, status: 'pending', date: 'Today' },
-    { id: 'rw-2', contractNumber: 1847, recipient: 'PlayerA', tornId: 1948201, rank: 'Partial', reward: '$4,500,000 (9 Objectives Verified)', rewardType: 'partial_objective', amountCash: 4500000, status: 'delivered', txId: 'TX-PRT-84910', date: 'Today' },
-    { id: 'rw-3', contractNumber: 1847, recipient: 'Anurag', tornId: 2849102, rank: 'Partial', reward: '$2,850,000 (6 Objectives Verified)', rewardType: 'partial_objective', amountCash: 2850000, status: 'delivered', txId: 'TX-PRT-84911', date: 'Today' },
-    { id: 'rw-4', contractNumber: 1846, recipient: 'PlayerB', tornId: 1820491, rank: '#1', reward: '$10,000,000 + 1× Xanax', rewardType: 'final_winner', amountCash: 10000000, status: 'delivered', txId: 'TX-89102-TN', date: 'Oct 6' },
-    { id: 'rw-5', contractNumber: 1845, recipient: 'PlayerC', tornId: 3019482, rank: '#1', reward: '$10,000,000', rewardType: 'final_winner', amountCash: 10000000, status: 'delivered', txId: 'TX-88391-TN', date: 'Oct 5' },
-    { id: 'rw-6', contractNumber: 1844, recipient: 'PlayerE', tornId: 2194801, rank: '#1', reward: '$10,000,000 + 1× Xanax', rewardType: 'final_winner', amountCash: 10000000, status: 'failed', date: 'Oct 4' },
-  ])
+  const [rewardsHistory, setRewardsHistory] = useState<RewardRecord[]>([])
 
   // Alerts & Issues
-  const [alerts, setAlerts] = useState<AdminAlert[]>([
-    { id: 'alt-1', title: '3 Verification Failures', description: 'Objective verification failed multiple times for Combat API endpoints.', type: 'verification', severity: 'danger', resolved: false, timestamp: '14 min ago' },
-    { id: 'alt-2', title: '2 Reward Delivery Failures', description: 'Reward transfers for Contract #1844 and #1843 require manual retry or vault review.', type: 'reward', severity: 'warning', resolved: false, timestamp: '1h ago' },
-    { id: 'alt-3', title: '1 Objective Disabled', description: 'Objective OBJ-008 was flagged and temporarily quarantined following API schema deprecation.', type: 'objective', severity: 'warning', resolved: false, timestamp: '3h ago' },
-  ])
+  const [alerts, setAlerts] = useState<AdminAlert[]>([])
 
   // Announcements & Live Notch Banner
-  const [announcements, setAnnouncements] = useState<AdminAnnouncement[]>([
-    {
-      id: 'ann-1',
-      title: 'Contract Ending Soon',
-      message: 'Only 60 minutes remain to verify today’s objectives for Contract #1847.',
-      type: 'Warning',
-      target: 'All users',
-      publishedAt: '12 min ago',
-      isActive: true,
-    },
-  ])
+  const [announcements, setAnnouncements] = useState<AdminAnnouncement[]>([])
 
   // Suspicious Activity
-  const [suspiciousActivity, setSuspiciousActivity] = useState<SuspiciousActivityItem[]>([
-    { id: 'susp-1', playerName: 'PlayerX', tornId: 4401928, contractNumber: 1847, event: 'Completed 6 objectives within 12 seconds.', riskLevel: 'High', timestamp: '45 sec ago', status: 'investigating' },
-    { id: 'susp-2', playerName: 'PlayerY', tornId: 2910481, contractNumber: 1847, event: 'Triggered repeated verification failures & payload collisions.', riskLevel: 'Medium', timestamp: '4 min ago', status: 'investigating' },
-  ])
+  const [suspiciousActivity, setSuspiciousActivity] = useState<SuspiciousActivityItem[]>([])
 
   // System Health
   const [systemHealth] = useState<SystemHealthMetrics>({
@@ -587,20 +403,86 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     authentication: 'operational',
     backgroundJobs: 'operational',
     webSocket: 'operational',
-    apiRequestsToday: 182452,
-    failedRequests: 23,
-    verificationErrors: 7,
-    avgVerificationTime: '1.8 sec',
+    apiRequestsToday: 0,
+    failedRequests: 0,
+    verificationErrors: 0,
+    avgVerificationTime: '1.2 ms',
   })
 
   // Audit Logs
-  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([
-    { id: 'log-1', admin: 'Admin01', timestamp: 'Today 04:21', action: 'Paused Contract', target: '#1847', details: 'Contract paused for maintenance.', tone: 'warning' },
-    { id: 'log-2', admin: 'Admin02', timestamp: 'Today 03:51', action: 'Issued Reward', target: 'PlayerA', details: '$10M + 1x Xanax disbursed.', tone: 'success' },
-  ])
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([])
+
+  // Platform Statistics from Database
+  const [stats, setStats] = useState<AdminPlatformStats>({
+    registeredUsers: 0,
+    activeUsers: 0,
+    activeContractors: 0,
+    contractsCompleted: 0,
+    totalRewardsDistributed: '$0',
+  })
+
+  const refreshStats = async () => {
+    try {
+      const res = await adminApi.getStats()
+      if (res) {
+        setStats({
+          registeredUsers: res.registeredUsers,
+          activeUsers: res.activeUsers,
+          activeContractors: res.activeContractors,
+          contractsCompleted: res.contractsCompleted,
+          totalRewardsDistributed: res.totalRewardsDistributed,
+        })
+      }
+    } catch (e) {
+      console.warn('Failed to refresh stats:', e)
+    }
+  }
+
+  // Contracts list in Admin
+  const [contractsList, setContractsList] = useState<any[]>([])
+
+  const refreshContracts = async () => {
+    try {
+      const list = await adminApi.getContracts()
+      if (list && Array.isArray(list)) {
+        setContractsList(list)
+      }
+    } catch (e) {
+      console.warn('Failed to refresh contracts list:', e)
+    }
+  }
+
+  const selectContract = async (id: number) => {
+    try {
+      const c = await adminApi.getContractById(id)
+      if (c) {
+        setContract({
+          number: c.id,
+          status: c.status,
+          type: c.type,
+          winnerConfig: c.winnerConfig,
+          startDate: c.starts_at,
+          endsAt: c.endsAt,
+          remainingMs: c.remainingMs,
+          participants: c.participants,
+          rewards: c.rewards,
+          objectives: c.objectives || [],
+          partialRewardsEnabled: false,
+          partialRewardPerObjective: 0,
+          winnerStatus: c.winnerStatus,
+          declaredWinner: c.declaredWinner,
+        })
+      }
+    } catch (e) {
+      console.warn('Failed to load contract by ID:', e)
+    }
+  }
 
   // On mount, query live backend API if available
   useEffect(() => {
+    refreshStats()
+    refreshContracts()
+
     adminApi.getContract().then((res) => {
       if (res) {
         setContract((prev) => ({
@@ -608,17 +490,23 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           number: res.id || prev.number,
           status: res.status || prev.status,
           type: res.type || prev.type,
-          winnerConfig: res.winner_count || prev.winnerConfig,
+          winnerConfig: res.winnerConfig || res.winner_count || prev.winnerConfig,
+          startDate: res.starts_at || prev.startDate,
+          endsAt: res.endsAt || prev.endsAt,
+          remainingMs: res.remainingMs,
           participants: res.participants || prev.participants,
-          objectives: res.objectives || prev.objectives,
-          partialRewardsEnabled: res.partial_rewards_enabled ?? prev.partialRewardsEnabled,
-          partialRewardPerObjective: res.partial_reward_per_objective || prev.partialRewardPerObjective,
+          rewards: res.rewards || prev.rewards,
+          winnerStatus: res.winnerStatus || prev.winnerStatus,
+          declaredWinner: res.declaredWinner || prev.declaredWinner,
+          objectives: res.objectives || [],
+          partialRewardsEnabled: false,
+          partialRewardPerObjective: 0,
         }))
       }
     })
 
     adminApi.getAnnouncements().then((res) => {
-      if (res && Array.isArray(res) && res.length > 0) {
+      if (res && Array.isArray(res)) {
         setAnnouncements(
           res.map((a: any) => ({
             id: a.id,
@@ -634,7 +522,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     })
 
     adminApi.getParticipants().then((res) => {
-      if (res && Array.isArray(res) && res.length > 0) {
+      if (res && Array.isArray(res)) {
         setParticipants(
           res.map((p: any) => ({
             id: p.id,
@@ -646,14 +534,14 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             partialRewardsEarned: p.partial_rewards_earned || 0,
             lastActive: p.last_activity_at || 'Just now',
             status: p.status || 'active',
-            objectivesProgress: initialToday.objectives.map((o, idx) => ({
-              id: o.id,
+            objectivesProgress: (p.objectives || initialToday.objectives).map((o: any, idx: number) => ({
+              id: o.id || idx + 1,
               title: o.title,
               category: o.category,
               difficulty: o.difficulty,
-              current: idx < (p.progress || 0) ? o.target : 0,
-              target: o.target,
-              partialReward: 500000,
+              current: idx < (p.progress || 0) ? (o.target || 1) : 0,
+              target: o.target || 1,
+              partialReward: o.partialReward || 500000,
               partialRewardStatus: idx < (p.progress || 0) ? 'credited' : 'unearned',
             })),
           }))
@@ -662,7 +550,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     })
 
     adminApi.getRewards().then((res) => {
-      if (res && Array.isArray(res) && res.length > 0) {
+      if (res && Array.isArray(res)) {
         setRewardsHistory(
           res.map((r: any) => ({
             id: r.id,
@@ -670,12 +558,66 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             recipient: r.torn_username,
             tornId: r.torn_user_id,
             rank: r.rank || (r.reward_type === 'final_winner' ? '#1' : 'Partial'),
-            reward: r.reward_type === 'final_winner' ? '$10,000,000 + 1× Xanax' : `$${(r.amount_cash / 1000).toFixed(0)}k (${r.description})`,
+            reward: r.reward_type === 'final_winner' ? '$10,000,000 + 1× Xanax' : `$${((r.amount_cash || 0) / 1000).toFixed(0)}k (${r.description})`,
             rewardType: r.reward_type,
             amountCash: r.amount_cash,
             status: r.status ? (r.status.toLowerCase() as any) : 'delivered',
             txId: r.tx_id,
             date: r.issued_at || 'Today',
+          }))
+        )
+      }
+    })
+
+    adminApi.getUsers().then((res) => {
+      if (res && Array.isArray(res)) {
+        setUsers(
+          res.map((u: any) => ({
+            id: u.id,
+            name: u.torn_username,
+            tornId: u.torn_user_id,
+            registeredDate: u.registered_at || 'Recently',
+            lastActive: u.last_active_at || 'Just now',
+            status: u.status || 'active',
+            contractsEntered: u.contracts_entered || 0,
+            contractsCompleted: u.contracts_completed || 0,
+            wins: u.wins || 0,
+            top3: u.top3 || 0,
+            completionRate: u.completion_rate || '0.0%',
+            contractHistory: [],
+          }))
+        )
+      }
+    })
+
+    adminApi.getSuspicious().then((res) => {
+      if (res && Array.isArray(res)) {
+        setSuspiciousActivity(
+          res.map((s: any) => ({
+            id: s.id,
+            playerName: s.player_name || 'Agent',
+            tornId: s.torn_user_id || 0,
+            contractNumber: s.contract_id || 1848,
+            event: s.event_description || s.event || 'Flagged anomaly',
+            riskLevel: s.risk_level || 'Medium',
+            timestamp: s.timestamp || 'Just now',
+            status: s.status || 'investigating',
+          }))
+        )
+      }
+    })
+
+    adminApi.getAlerts().then((res) => {
+      if (res && Array.isArray(res)) {
+        setAlerts(
+          res.map((a: any) => ({
+            id: a.id,
+            title: a.title,
+            description: a.description,
+            type: a.type || 'verification',
+            severity: a.severity || 'warning',
+            resolved: Boolean(a.resolved),
+            timestamp: a.timestamp || 'Just now',
           }))
         )
       }
@@ -692,8 +634,10 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       status: next.status,
       type: next.type,
       winner_count: next.winnerConfig,
+      max_objectives: next.maxObjectives,
       partial_rewards_enabled: next.partialRewardsEnabled,
       partial_reward_per_objective: next.partialRewardPerObjective,
+      objectives: next.objectives,
     })
   }
 
@@ -741,9 +685,144 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     addAuditLog('Rewards Updated', `#${contract.number}`, `Updated ${rewards.length} prize tiers.`)
   }
 
-  const updateObjectives = (objectives: (Objective & { partialReward?: number })[]) => {
+  const updateObjectives = (objectives: Objective[]) => {
     saveContract({ ...contract, objectives })
     addAuditLog('Objectives Updated', `#${contract.number}`, `Active objectives array customized.`)
+  }
+
+  const updateMaxObjectives = (max: number) => {
+    saveContract({ ...contract, maxObjectives: max })
+    addAuditLog('Max Tasks Limit Changed', `#${contract.number}`, `Max tasks set to ${max}.`, 'warning')
+  }
+
+  const addObjectiveToContract = (newObj: Omit<Objective, 'id' | 'current'> & { log_pattern?: string; log_patterns?: any[] }) => {
+    const currentObjs = contract.objectives || []
+    const max = contract.maxObjectives || 10
+    if (currentObjs.length >= max) {
+      alert(`Cannot add more than ${max} objectives. Increase max tasks limit first.`)
+      return
+    }
+
+    const created: Objective = {
+      id: currentObjs.length + 1,
+      title: newObj.title,
+      name: newObj.title,
+      category: newObj.category,
+      difficulty: newObj.difficulty,
+      complexity: newObj.complexity || (newObj.difficulty as any),
+      current: 0,
+      target: newObj.target,
+      bounty: newObj.bounty ?? newObj.partialReward ?? 500000,
+      partialReward: newObj.partialReward ?? newObj.bounty ?? 500000,
+      agent_note: newObj.agent_note || '',
+      log_pattern: newObj.log_pattern,
+      log_patterns: newObj.log_patterns || (newObj.log_pattern ? [{ key: `pat_${Date.now()}`, template: newObj.log_pattern }] : []),
+      metric: newObj.metric || 'count',
+      verification: newObj.verification || 'log',
+    }
+
+    const nextObjectives = [...currentObjs, created]
+    saveContract({ ...contract, objectives: nextObjectives })
+    addAuditLog('Task Added to Contract', `#${contract.number}`, `Added task: "${created.title}" with log syntax.`, 'success')
+  }
+
+  const editObjectiveInContract = (index: number, updated: Partial<Objective>) => {
+    const currentObjs = [...contract.objectives]
+    if (index >= 0 && index < currentObjs.length) {
+      currentObjs[index] = {
+        ...currentObjs[index],
+        ...updated,
+        complexity: (updated.complexity || updated.difficulty || currentObjs[index].complexity || currentObjs[index].difficulty) as any,
+        bounty: updated.bounty ?? updated.partialReward ?? currentObjs[index].bounty,
+        partialReward: updated.partialReward ?? updated.bounty ?? currentObjs[index].partialReward,
+      }
+      saveContract({ ...contract, objectives: currentObjs })
+      addAuditLog('Task Edited in Contract', `#${contract.number}`, `Updated task #${index + 1}: "${currentObjs[index].title}".`)
+    }
+  }
+
+  const deleteObjectiveFromContract = (index: number) => {
+    const currentObjs = contract.objectives.filter((_, idx) => idx !== index)
+    // Re-index remaining
+    const reindexed = currentObjs.map((o, idx) => ({ ...o, id: idx + 1 }))
+    saveContract({ ...contract, objectives: reindexed })
+    addAuditLog('Task Deleted from Contract', `#${contract.number}`, `Removed task #${index + 1} from active contract.`, 'danger')
+  }
+
+  // Agent Progress Override & Extra Bounty (Req 8)
+  const manualOverrideTask = async (
+    userId: string,
+    objectiveId: string,
+    action: 'mark_completed' | 'mark_uncompleted' | 'reset' | 'delete',
+    reason: string
+  ): Promise<boolean> => {
+    try {
+      const res = await adminApi.taskOverride({
+        userId,
+        contractId: contract.number,
+        contractObjectiveId: objectiveId,
+        action,
+        reason,
+      })
+      if (res?.success) {
+        addAuditLog(`Agent Task ${action}`, userId, `Overrode objective ${objectiveId}. Reason: ${reason}`, 'warning')
+        // Refresh participants
+        const updated = await adminApi.getParticipants()
+        if (updated && Array.isArray(updated)) {
+          setParticipants(
+            updated.map((p: any) => ({
+              id: p.id,
+              name: p.torn_username,
+              tornId: p.torn_user_id,
+              rank: p.current_rank || 1,
+              completedCount: p.progress || 0,
+              totalCount: p.total_objectives || 10,
+              partialRewardsEarned: p.partial_rewards_earned || 0,
+              lastActive: p.last_activity_at || 'Just now',
+              status: p.status || 'active',
+              objectivesProgress: contract.objectives.map((o, idx) => ({
+                id: o.id,
+                title: o.title,
+                category: o.category,
+                difficulty: o.difficulty,
+                current: idx < (p.progress || 0) ? o.target : 0,
+                target: o.target,
+                partialReward: o.partialReward || o.bounty || 500000,
+                partialRewardStatus: idx < (p.progress || 0) ? 'credited' : 'unearned',
+              })),
+            }))
+          )
+        }
+        return true
+      }
+    } catch (e) {
+      console.error('Failed manual override:', e)
+    }
+    return false
+  }
+
+  const addExtraBounty = async (userId: string, amount: number, reason: string): Promise<boolean> => {
+    try {
+      const newReward: RewardRecord = {
+        id: `rw-bonus-${Date.now()}`,
+        contractNumber: contract.number,
+        recipient: userId,
+        tornId: 0,
+        rank: 'Bonus',
+        reward: `+$${(amount / 1000).toFixed(0)}k (Admin Bonus: ${reason})`,
+        rewardType: 'threshold_bonus',
+        amountCash: amount,
+        status: 'delivered',
+        date: 'Today',
+        txId: `TX-BONUS-${Math.floor(10000 + Math.random() * 90000)}`,
+      }
+      setRewardsHistory((prev) => [newReward, ...prev])
+      addAuditLog('Extra Bounty Granted', userId, `Awarded +$${amount.toLocaleString()} extra bounty. Reason: ${reason}`, 'success')
+      return true
+    } catch (e) {
+      console.error('Failed to grant extra bounty:', e)
+      return false
+    }
   }
 
   const togglePartialRewards = (enabled: boolean) => {
@@ -751,29 +830,35 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     addAuditLog('Partial Rewards Toggled', `#${contract.number}`, `Partial objective bounties set to ${enabled ? 'ENABLED' : 'DISABLED'}.`, 'normal')
   }
 
-  const createContract = (newContract: Partial<AdminContractSettings>) => {
+  const createContract = async (newContract: Partial<AdminContractSettings>) => {
     const created: AdminContractSettings = {
-      number: newContract.number || contract.number + 1,
-      status: newContract.status || 'scheduled',
+      number: newContract.number || 1848,
+      status: newContract.status || 'draft',
       type: newContract.type || 'standard',
       winnerConfig: newContract.winnerConfig || '1 winner',
-      startDate: newContract.startDate || 'Tomorrow — 12:00 AM',
-      endsAt: Date.now() + 24 * 3600 * 1000,
+      startDate: newContract.startDate || new Date().toISOString(),
+      endsAt: newContract.endsAt || (Date.now() + 24 * 3600 * 1000),
       participants: 0,
-      rewards: newContract.rewards || [{ place: 'Winner', reward: '$10,000,000 + 1× Xanax' }],
-      objectives: newContract.objectives || contract.objectives,
-      partialRewardsEnabled: true,
-      partialRewardPerObjective: 500000,
+      rewards: newContract.rewards || [{ place: '1st', reward: '$10,000,000 + 1× Xanax' }],
+      objectives: newContract.objectives || [],
+      maxObjectives: newContract.maxObjectives || 10,
+      partialRewardsEnabled: false,
+      partialRewardPerObjective: 0,
     }
     saveContract(created)
-    adminApi.createContract({
+    await adminApi.createContract({
       number: created.number,
       type: created.type,
+      status: created.status,
       winnerConfig: created.winnerConfig,
       rewards: created.rewards,
-      partial_rewards_enabled: true,
+      starts_at: created.startDate,
+      ends_at: created.endsAt,
+      max_objectives: created.maxObjectives,
+      partial_rewards_enabled: false,
     })
-    addAuditLog('Contract Created', `#${created.number}`, `Created new ${created.type.toUpperCase()} contract with partial bounties.`, 'success')
+    await refreshContracts()
+    addAuditLog('Contract Created', `#${created.number}`, `Created new ${created.type.toUpperCase()} contract tagged as ${created.status.toUpperCase()}.`, 'success')
   }
 
   // Objectives
@@ -847,40 +932,110 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   }
 
   // Controls
-  const startContract = () => {
+  const startContract = async () => {
     updateStatus('active')
-    adminApi.executeControl('start')
+    const res = await adminApi.executeControl('start', { contractId: contract.number })
+    if (res?.contract) {
+      setContract((prev) => ({
+        ...prev,
+        status: 'active',
+        endsAt: res.contract.ends_at,
+        remainingMs: res.contract.remaining_ms,
+      }))
+    }
+    await refreshContracts()
   }
-  const pauseContract = () => {
-    updateStatus('paused')
-    adminApi.executeControl('pause')
+  const pauseContract = async () => {
+    const currentRemaining = Math.max(0, contract.endsAt - Date.now())
+    setContract((prev) => ({
+      ...prev,
+      status: 'paused',
+      remainingMs: currentRemaining,
+    }))
+    const res = await adminApi.executeControl('pause', { contractId: contract.number })
+    if (res?.contract) {
+      setContract((prev) => ({
+        ...prev,
+        status: 'paused',
+        endsAt: res.contract.ends_at,
+        remainingMs: res.contract.remaining_ms !== null && res.contract.remaining_ms !== undefined ? res.contract.remaining_ms : currentRemaining,
+      }))
+    }
+    await refreshContracts()
+    addAuditLog('Status Changed', `#${contract.number}`, 'Contract status shifted to PAUSED.', 'warning')
   }
-  const resumeContract = () => {
+  const resumeContract = async () => {
     updateStatus('active')
-    adminApi.executeControl('resume')
+    const res = await adminApi.executeControl('resume', { contractId: contract.number })
+    if (res?.contract) {
+      setContract((prev) => ({
+        ...prev,
+        status: 'active',
+        endsAt: res.contract.ends_at,
+        remainingMs: res.contract.remaining_ms,
+      }))
+    }
+    await refreshContracts()
   }
-  const extendDeadlineMinutes = (minutes: number) => {
-    const nextEndsAt = contract.endsAt + minutes * 60 * 1000
-    saveContract({ ...contract, endsAt: nextEndsAt })
-    adminApi.executeControl('extend', { minutes })
+  const extendDeadlineMinutes = async (minutes: number) => {
+    const res = await adminApi.executeControl('extend', { contractId: contract.number, data: { minutes } })
+    if (res?.contract) {
+      setContract((prev) => ({
+        ...prev,
+        endsAt: res.contract.ends_at,
+        remainingMs: res.contract.remaining_ms,
+      }))
+    } else {
+      const nextEndsAt = contract.endsAt + minutes * 60 * 1000
+      saveContract({ ...contract, endsAt: nextEndsAt })
+    }
+    await refreshContracts()
     addAuditLog('Deadline Extended', `#${contract.number}`, `Extended duration by +${minutes} minutes.`, 'warning')
   }
-  const endContract = () => {
+  const endContract = async (winnerName?: string) => {
     updateStatus('completed')
-    adminApi.executeControl('end')
+    const res = await adminApi.executeControl('end', { contractId: contract.number, data: { winnerName } })
+    if (res?.contract) {
+      setContract((prev) => ({
+        ...prev,
+        status: 'completed',
+        declaredWinner: res.contract.declared_winner,
+        winnerStatus: res.contract.winner_status,
+        remainingMs: 0,
+      }))
+    }
+    await refreshContracts()
+    addAuditLog('Ended Contract', `#${contract.number}`, `Contract marked completed. Winner: ${winnerName || 'None'}.`, 'success')
   }
-  const cancelContract = () => {
+  const cancelContract = async () => {
     updateStatus('cancelled')
-    adminApi.executeControl('cancel')
+    const res = await adminApi.executeControl('cancel', { contractId: contract.number })
+    if (res?.contract) {
+      setContract((prev) => ({
+        ...prev,
+        status: 'cancelled',
+        remainingMs: 0,
+      }))
+    }
+    await refreshContracts()
+    addAuditLog('Cancelled Contract', `#${contract.number}`, 'Contract tagged as CANCELLED.', 'danger')
   }
-  const invalidateContract = (reason = 'API telemetry mismatch') => {
+  const resetContractProgress = async () => {
+    await adminApi.executeControl('reset', { contractId: contract.number })
+    const parts = await adminApi.getParticipants()
+    if (parts && Array.isArray(parts)) setParticipants(parts)
+    addAuditLog('Reset Progress', `#${contract.number}`, 'Reset all participant contract progress to 0 across the platform.', 'danger')
+  }
+  const invalidateContract = async (reason = 'API telemetry mismatch') => {
     saveContract({ ...contract, status: 'invalid' })
-    adminApi.executeControl('invalidate', { reason })
+    await adminApi.executeControl('invalidate', { contractId: contract.number, reason })
+    await refreshContracts()
     addAuditLog('Contract Invalidated', `#${contract.number}`, `Voided: ${reason}`, 'danger')
   }
-  const declareWinner = (winnerName: string) => {
+  const declareWinner = async (winnerName: string) => {
     saveContract({ ...contract, status: 'completed', declaredWinner: winnerName, winnerStatus: 'Verified Winner' })
-    adminApi.executeControl('declare_winner', { winnerName })
+    await adminApi.executeControl('declare_winner', { contractId: contract.number, data: { winnerName } })
+    await refreshContracts()
     addAuditLog('Winner Declared', `#${contract.number}`, `Declared ${winnerName} as official winner.`, 'success')
   }
 
@@ -1015,15 +1170,28 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   return (
     <AdminContext.Provider
       value={{
+        stats,
+        refreshStats,
+
         contract,
+        contractsList,
+        refreshContracts,
+        selectContract,
         updateStatus,
         updateType,
         updateWinnerConfig,
         updateContractNumber,
         updateRewards,
         updateObjectives,
+        updateMaxObjectives,
         togglePartialRewards,
         createContract,
+
+        addObjectiveToContract,
+        editObjectiveInContract,
+        deleteObjectiveFromContract,
+        manualOverrideTask,
+        addExtraBounty,
 
         objectivePool,
         toggleObjectiveEnabled,
@@ -1038,6 +1206,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         extendDeadlineMinutes,
         endContract,
         cancelContract,
+        resetContractProgress,
         invalidateContract,
         declareWinner,
 

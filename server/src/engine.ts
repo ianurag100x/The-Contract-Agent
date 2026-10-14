@@ -8,6 +8,15 @@ import {
   type PlayerEvent,
   type RewardTransaction,
 } from './db.ts'
+import {
+  compileLogPattern,
+  testLogLine,
+  stripPrefix,
+  type CompiledPattern,
+  type StoredLogPattern,
+} from './patterns.ts'
+import { type NormalizedLogEntry } from './torn.ts'
+import { sqliteDb } from './sqlite.ts'
 
 export class ContractEngine {
   /**
@@ -34,11 +43,19 @@ export class ContractEngine {
       objective_definition_id: def.id,
       objective_order: idx + 1,
       title: def.name,
+      name: def.name,
       category: def.category,
       difficulty: def.difficulty,
+      complexity: def.complexity || def.difficulty,
       target_value: def.default_target,
       partial_reward: def.default_partial_reward || 500000,
+      bounty: def.bounty || def.default_partial_reward || 500000,
+      agent_note: def.agent_note || '',
+      verification: def.verification || 'log',
+      metric: def.metric || 'count',
+      log_patterns: def.log_patterns || [],
       verification_status: 'active',
+      version: 1,
       created_at: new Date().toISOString(),
     }))
 
@@ -47,6 +64,149 @@ export class ContractEngine {
     db.set('contract_objectives', [...allContractObjs, ...newContractObjectives])
 
     return newContractObjectives
+  }
+
+  /**
+   * Evaluates a batch of normalized logs against active objectives for a participant.
+   * Derives progress from log matches per §8.1 of specification.
+   */
+  public evaluateLogsForParticipant(params: {
+    userId: string
+    contractId: number
+    logs: (NormalizedLogEntry | { rawText: string; occurredAt?: string })[]
+  }): { matchesFound: number; objectivesCompleted: string[]; bountiesAwarded: number } {
+    const { userId, contractId, logs } = params
+    const contractObjectives = db.get('contract_objectives').filter((co) => co.contract_id === contractId && co.verification_status === 'active')
+    const partObjectives = db.get('participant_objectives')
+    const participants = db.get('contract_participants')
+    const participant = participants.find((p) => p.contract_id === contractId && p.user_id === userId)
+
+    if (!participant) {
+      return { matchesFound: 0, objectivesCompleted: [], bountiesAwarded: 0 }
+    }
+
+    let matchesFound = 0
+    let bountiesAwarded = 0
+    const completedTitles: string[] = []
+
+    // Retrieve active contract objectives from SQLite if present
+    let rawObjs = contractObjectives
+    try {
+      const sqliteContractObjs = sqliteDb.prepare('SELECT * FROM contract_objectives WHERE contract_id = ?').all(contractId) as any[]
+      if (sqliteContractObjs && sqliteContractObjs.length > 0) {
+        rawObjs = sqliteContractObjs.map((co) => ({
+          ...co,
+          target_value: co.target_value,
+          metric: co.metric || 'count',
+          log_patterns: (co.log_pattern || '')
+            .split('\n')
+            .map((l: string) => l.trim())
+            .filter(Boolean)
+            .map((t: string, pIdx: number) => ({ key: `pat_${co.id}_${pIdx + 1}`, template: t })),
+        }))
+      }
+    } catch {}
+
+    for (const co of rawObjs) {
+      const patternsList: StoredLogPattern[] = co.log_patterns && co.log_patterns.length > 0
+        ? co.log_patterns
+        : (co.log_pattern ? (co.log_pattern as string).split('\n').map((l, pIdx) => ({ key: `pat_${co.id}_${pIdx + 1}`, template: l.trim() })).filter(p => p.template) : [])
+
+      // Skip manual verification objectives or empty patterns
+      if (co.verification === 'manual' || patternsList.length === 0) {
+        continue
+      }
+
+      // Find participant's progress on this objective
+      let po = partObjectives.find((item) => item.participant_id === participant.id && item.contract_objective_id === co.id)
+      if (!po) {
+        po = {
+          id: `po-${participant.id}-${co.id}`,
+          participant_id: participant.id,
+          contract_id: contractId,
+          contract_objective_id: co.id,
+          title: co.title || co.name || 'Objective',
+          category: co.category,
+          difficulty: co.difficulty,
+          status: 'in_progress',
+          current_value: 0,
+          target_value: co.target_value,
+          partial_reward: co.partial_reward || co.bounty || 500000,
+          partial_reward_status: 'unearned',
+          started_at: participant.started_at,
+          verification_attempts: 0,
+        }
+        partObjectives.push(po)
+      }
+
+      if (po.status === 'verified') {
+        continue // Already verified
+      }
+
+      // Compile patterns
+      const compiled: CompiledPattern[] = []
+      for (const pat of patternsList) {
+        try {
+          compiled.push(compileLogPattern(pat))
+        } catch (e) {
+          console.warn(`Failed to compile pattern ${pat.key}:`, e)
+        }
+      }
+
+      const metric = co.metric || 'count'
+      const distinctSet = new Set<string>()
+
+      for (const log of logs) {
+        const res = testLogLine(log.rawText, compiled, metric)
+        if (res.matched) {
+          matchesFound++
+          if (metric === 'count') {
+            po.current_value += 1
+          } else if (metric === 'sum' && res.value !== undefined) {
+            po.current_value += res.value
+          } else if (metric === 'distinct' && res.distinctKey) {
+            distinctSet.add(res.distinctKey)
+            po.current_value = distinctSet.size
+          }
+        }
+      }
+
+      // Check if target reached
+      if (po.current_value >= po.target_value && po.status !== 'verified') {
+        po.status = 'verified'
+        po.verified_at = new Date().toISOString()
+        po.completed_at = new Date().toISOString()
+        completedTitles.push(po.title)
+
+        // Award bounty
+        const bountyVal = co.partial_reward || co.bounty || 500000
+        if (bountyVal > 0 && po.partial_reward_status !== 'credited') {
+          po.partial_reward_status = 'credited'
+          bountiesAwarded += bountyVal
+
+          const rewardTx: RewardTransaction = {
+            id: `rw-log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            user_id: userId,
+            torn_user_id: participant.torn_user_id,
+            torn_username: participant.torn_username,
+            contract_id: contractId,
+            reward_type: 'partial_objective',
+            description: `Log-verified Bounty: "${po.title}"`,
+            amount_cash: bountyVal,
+            status: 'DELIVERED',
+            issued_at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            delivered_at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            tx_id: `TX-LOG-${Math.floor(10000 + Math.random() * 90000)}`,
+          }
+          db.set('reward_transactions', [rewardTx, ...db.get('reward_transactions')])
+        }
+      }
+    }
+
+    db.set('participant_objectives', [...partObjectives])
+    this.recalculateParticipantProgress(userId, contractId)
+
+    return { matchesFound, objectivesCompleted: completedTitles, bountiesAwarded }
   }
 
   /**

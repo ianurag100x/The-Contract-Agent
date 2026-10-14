@@ -61,6 +61,8 @@ export const adminApi = {
 
   // Contract
   getContract: () => fetchJson<any>('/admin/contract'),
+  getContracts: () => fetchJson<any[]>('/admin/contracts'),
+  getContractById: (id: number) => fetchJson<any>(`/admin/contracts/${id}`),
   updateContract: (data: any) => fetchJson<any>('/admin/contract', { method: 'PUT', body: JSON.stringify(data) }),
   createContract: (data: any) => fetchJson<any>('/admin/contract/create', { method: 'POST', body: JSON.stringify(data) }),
   executeControl: (action: string, data?: any) => fetchJson<any>('/admin/contract/controls', { method: 'POST', body: JSON.stringify({ action, data }) }),
@@ -98,4 +100,16 @@ export const adminApi = {
 
   // Audit Logs
   getAuditLogs: () => fetchJson<any[]>('/admin/audit'),
+
+  // Spec §6.8 Pattern Testing Tool
+  testPattern: (data: { patterns: any[]; metric?: string; target?: number; samples: string[] }) =>
+    fetchJson<any>('/admin/patterns/test', { method: 'POST', body: JSON.stringify(data) }),
+
+  // Spec §7 Live Torn Logs Ingestion
+  syncTornLogs: (data: { apiKey?: string; userId?: string; contractId?: number; limit?: number; cat?: number }) =>
+    fetchJson<any>('/admin/torn/sync-user', { method: 'POST', body: JSON.stringify(data) }),
+
+  // Spec §10.2 Admin Task Override
+  taskOverride: (data: { userId: string; contractId?: number; contractObjectiveId: string; action: string; reason: string }) =>
+    fetchJson<any>('/admin/participants/task-override', { method: 'POST', body: JSON.stringify(data) }),
 }

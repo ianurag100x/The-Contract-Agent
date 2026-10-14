@@ -1,21 +1,29 @@
 import { useEffect, useState } from 'react'
 import { Card, PageHeader } from '../components/ui'
-import { champions as defaultChampions } from '../data/mock'
 import { leaderboardApi } from '../lib/api'
 import { duration } from '../lib/format'
 
 export default function LeaderboardPage() {
-  const [championList, setChampionList] = useState(defaultChampions)
+  const [championList, setChampionList] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let mounted = true
-    leaderboardApi.getLeaderboard().then((res) => {
-      if (mounted && res?.champions && res.champions.length > 0) {
-        setChampionList(res.champions)
-      }
-    })
+    const fetchLeaderboard = () => {
+      leaderboardApi.getLeaderboard().then((res) => {
+        if (mounted) {
+          setChampionList(res?.champions || [])
+          setLoading(false)
+        }
+      })
+    }
+
+    fetchLeaderboard()
+    const interval = setInterval(fetchLeaderboard, 3000)
+
     return () => {
       mounted = false
+      clearInterval(interval)
     }
   }, [])
 
@@ -27,66 +35,74 @@ export default function LeaderboardPage() {
       />
 
       <Card>
-        {/* Table ≥ md */}
-        <div className="hidden overflow-x-auto md:block">
-          <table className="w-full text-left text-sm">
-            <caption className="sr-only">Contract champions</caption>
-            <thead>
-              <tr className="border-b border-line text-xs text-muted">
-                <th scope="col" className="w-16 px-5 py-3 font-medium">Rank</th>
-                <th scope="col" className="px-3 py-3 font-medium">Player</th>
-                <th scope="col" className="px-3 py-3 font-medium">Wins</th>
-                <th scope="col" className="px-3 py-3 font-medium">Top 3</th>
-                <th scope="col" className="px-3 py-3 font-medium">Contracts completed</th>
-                <th scope="col" className="px-5 py-3 font-medium">Fastest</th>
-              </tr>
-            </thead>
-            <tbody>
-              {championList.map((c, i) => (
-                <tr
-                  key={c.name}
-                  className="border-b border-line last:border-0 hover:bg-raised/40"
-                >
-                  <td className="tabular px-5 py-3.5 text-muted">{i + 1}</td>
-                  <td className="px-3 py-3.5 font-medium">{c.name}</td>
-                  <td className="tabular px-3 py-3.5">{c.wins}</td>
-                  <td className="tabular px-3 py-3.5">{c.top3}</td>
-                  <td className="tabular px-3 py-3.5">{c.completed}</td>
-                  <td className="tabular px-5 py-3.5">{duration(c.fastestMin || 110)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        {championList.length === 0 ? (
+          <div className="p-8 text-center text-sm text-muted">
+            {loading ? 'Loading champions...' : 'No contract champions yet. Complete contracts to earn a spot in the Hall of Fame!'}
+          </div>
+        ) : (
+          <>
+            {/* Table ≥ md */}
+            <div className="hidden overflow-x-auto md:block">
+              <table className="w-full text-left text-sm">
+                <caption className="sr-only">Contract champions</caption>
+                <thead>
+                  <tr className="border-b border-line text-xs text-muted">
+                    <th scope="col" className="w-16 px-5 py-3 font-medium">Rank</th>
+                    <th scope="col" className="px-3 py-3 font-medium">Player</th>
+                    <th scope="col" className="px-3 py-3 font-medium">Wins</th>
+                    <th scope="col" className="px-3 py-3 font-medium">Top 3</th>
+                    <th scope="col" className="px-3 py-3 font-medium">Contracts completed</th>
+                    <th scope="col" className="px-5 py-3 font-medium">Fastest</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {championList.map((c, i) => (
+                    <tr
+                      key={c.name}
+                      className="border-b border-line last:border-0 hover:bg-raised/40"
+                    >
+                      <td className="tabular px-5 py-3.5 text-muted">{i + 1}</td>
+                      <td className="px-3 py-3.5 font-medium">{c.name}</td>
+                      <td className="tabular px-3 py-3.5">{c.wins}</td>
+                      <td className="tabular px-3 py-3.5">{c.top3}</td>
+                      <td className="tabular px-3 py-3.5">{c.completed}</td>
+                      <td className="tabular px-5 py-3.5">{duration(c.fastestMin || 110)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
-        {/* Cards < md */}
-        <ol className="divide-y divide-line md:hidden">
-          {championList.map((c, i) => (
-            <li key={c.name} className="px-4 py-3.5">
-              <div className="flex items-baseline justify-between">
-                <p className="text-sm font-medium">
-                  <span className="tabular mr-2 text-muted">{i + 1}</span>
-                  {c.name}
-                </p>
-                <p className="tabular text-xs text-muted">
-                  Fastest {duration(c.fastestMin || 110)}
-                </p>
-              </div>
-              <dl className="tabular mt-2 grid grid-cols-3 gap-2 text-xs">
-                {[
-                  ['Wins', c.wins],
-                  ['Top 3', c.top3],
-                  ['Completed', c.completed],
-                ].map(([k, v]) => (
-                  <div key={k} className="rounded-lg bg-raised/50 px-2.5 py-1.5">
-                    <dt className="text-muted">{k}</dt>
-                    <dd className="text-sm font-semibold">{v}</dd>
+            {/* Cards < md */}
+            <ol className="divide-y divide-line md:hidden">
+              {championList.map((c, i) => (
+                <li key={c.name} className="px-4 py-3.5">
+                  <div className="flex items-baseline justify-between">
+                    <p className="text-sm font-medium">
+                      <span className="tabular mr-2 text-muted">{i + 1}</span>
+                      {c.name}
+                    </p>
+                    <p className="tabular text-xs text-muted">
+                      Fastest {duration(c.fastestMin || 110)}
+                    </p>
                   </div>
-                ))}
-              </dl>
-            </li>
-          ))}
-        </ol>
+                  <dl className="tabular mt-2 grid grid-cols-3 gap-2 text-xs">
+                    {[
+                      ['Wins', c.wins],
+                      ['Top 3', c.top3],
+                      ['Completed', c.completed],
+                    ].map(([k, v]) => (
+                      <div key={k} className="rounded-lg bg-raised/50 px-2.5 py-1.5">
+                        <dt className="text-muted">{k}</dt>
+                        <dd className="text-sm font-semibold">{v}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </li>
+              ))}
+            </ol>
+          </>
+        )}
       </Card>
     </>
   )
