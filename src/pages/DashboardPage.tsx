@@ -58,13 +58,16 @@ export default function DashboardPage() {
       dashboardApi.getStats().then((data) => {
         if (mounted && data?.globalStats) {
           setStats(data.globalStats)
-          setDbSource((data.globalStats as any).source === 'supabase' ? 'Supabase Live' : 'Database Active')
+          setDbSource(
+            (data.globalStats as any).source === 'supabase'
+              ? 'Supabase Live'
+              : 'Database Active'
+          )
         }
       })
     }
 
     fetchStats()
-    // Poll every 3 seconds for real-time live database updates
     const timer = setInterval(fetchStats, 3000)
 
     return () => {

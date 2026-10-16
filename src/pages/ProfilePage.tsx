@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { Coins, Trophy } from 'lucide-react'
 import {
   AchievementsCard,
@@ -6,22 +6,23 @@ import {
   StatsCard,
 } from '../components/dashboard'
 import { Card, PageHeader, Pill } from '../components/ui'
+import { ApiAuthenticationModule } from '../components/ApiAuthenticationModule'
 import { profileApi } from '../lib/api'
 
 export default function ProfilePage() {
   const [profileData, setProfileData] = useState<any>(null)
 
-  useEffect(() => {
-    let mounted = true
+  const loadProfile = useCallback(() => {
     profileApi.getProfile().then((res) => {
-      if (mounted && res) {
+      if (res) {
         setProfileData(res)
       }
     })
-    return () => {
-      mounted = false
-    }
   }, [])
+
+  useEffect(() => {
+    loadProfile()
+  }, [loadProfile])
 
   const rewards = profileData?.rewards || []
   const user = profileData?.user || { torn_username: 'Anurag', torn_level: 48, torn_user_id: 2849102 }
@@ -33,10 +34,15 @@ export default function ProfilePage() {
         subtitle={`Level ${user.torn_level} • Torn ID #${user.torn_user_id} • Status: Active Agent`}
         right={
           <div className="flex items-center gap-2">
-            <Pill tone="accent">Agent Verified</Pill>
+            <Pill tone={user.hasApiKey || user.torn_api_key ? 'accent' : 'neutral'}>
+              {user.hasApiKey || user.torn_api_key ? 'API Connected' : 'Agent Verified'}
+            </Pill>
           </div>
         }
       />
+
+      {/* Torn API Authentication & Live Task Progress Evaluation Module */}
+      <ApiAuthenticationModule user={user} onProfileUpdated={loadProfile} />
 
       <div className="grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-2">
         <HistoryCard showLink={false} />

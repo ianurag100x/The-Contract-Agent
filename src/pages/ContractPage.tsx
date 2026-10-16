@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Crown, Trophy } from 'lucide-react'
+import { Crown, Trophy, Terminal, ChevronDown, ChevronUp, Clock } from 'lucide-react'
 import ObjectiveList from '../components/ObjectiveList'
 import {
   buttonClass,
@@ -10,21 +10,24 @@ import {
   StatStrip,
 } from '../components/ui'
 import { useNow } from '../hooks/useNow'
-import { contractApi } from '../lib/api'
-import { hms } from '../lib/format'
+import { contractApi, profileApi } from '../lib/api'
+import { getContractTimerState } from '../lib/format'
 import { contractTypeMeta } from '../lib/meta'
 import type { ContractType } from '../types'
 import { useAdmin } from '../state/admin'
 import { useContractState } from '../state/contract'
+import { useAuth } from '../state/auth'
 
 export default function ContractPage() {
   const now = useNow()
+  const { user } = useAuth()
   const { started, setStarted } = useContractState()
   const { contract: adminContract } = useAdmin()
   const [activeData, setActiveData] = useState<any>(null)
+  const [refreshFeedback, setRefreshFeedback] = useState<string | null>(null)
 
   const loadActive = () => {
-    contractApi.getActive().then((res) => {
+    contractApi.getActive(user?.id).then((res) => {
       if (res) {
         setActiveData(res)
       }
@@ -35,7 +38,7 @@ export default function ContractPage() {
     loadActive()
     const interval = setInterval(loadActive, 2500)
     return () => clearInterval(interval)
-  }, [])
+  }, [user?.id])
 
   const contract = activeData?.contract || adminContract
   const participant = activeData?.participant || { progress: 0, partialRewardsEarned: 0, rank: 1 }
@@ -43,7 +46,7 @@ export default function ContractPage() {
 
   const contractTypeKey = (contract.type || 'standard') as ContractType
   const type = contractTypeMeta[contractTypeKey] || contractTypeMeta.standard
-  const done = participant.progress || contract.objectives?.filter((o: any) => o.current >= o.target).length || 0
+  const done = participant?.progress ?? contract.objectives?.filter((o: any) => o.current >= o.target).length ?? 0
   const you = standings.find((s: any) => s.isYou) || { rank: 1 }
   const visibleStandings = started ? standings : standings.filter((s: any) => !s.isYou)
 
@@ -54,11 +57,41 @@ export default function ContractPage() {
     }
   }
 
+  const [lastPulledLogs, setLastPulledLogs] = useState<any[]>([])
+  const [showLogsInspector, setShowLogsInspector] = useState(false)
+
+  const handleRefreshObjective = async (_idx: number, _obj?: any) => {
+    try {
+      const res = await profileApi.checkTaskProgress(contract.number || contract.id || 1847, user?.id || 'usr-4')
+      if (res?.success) {
+        if (res.sampleLogs && Array.isArray(res.sampleLogs)) {
+          setLastPulledLogs(res.sampleLogs)
+          setShowLogsInspector(true)
+        }
+        if (res.evaluation?.objectivesCompleted?.length > 0) {
+          setRefreshFeedback(`Success! Completed: ${res.evaluation.objectivesCompleted.join(', ')}`)
+        } else {
+          setRefreshFeedback(`Scanned ${res.logsScanned || 0} logs. ${res.evaluation?.matchesFound || 0} matches found.`)
+        }
+        loadActive()
+      } else if (res?.error) {
+        setRefreshFeedback(`Sync error: ${typeof res.error === 'object' ? JSON.stringify(res.error) : res.error}`)
+      }
+    } catch (e: any) {
+      setRefreshFeedback('Failed to pull Torn logs. Please check your API key in Profile.')
+    }
+    setTimeout(() => {
+      loadActive()
+    }, 500)
+    setTimeout(() => setRefreshFeedback(null), 6000)
+  }
+
+
   return (
     <>
       <PageHeader
         title={`Contract #${contract.number || contract.id || 1847}`}
-        subtitle="One contract. Ten objectives. One winner."
+        subtitle={`One contract. ${contract.objectives?.length || 10} objectives. One winner.`}
         right={
           <div className="flex items-center gap-2">
             <Pill>{type.label}</Pill>
@@ -83,12 +116,53 @@ export default function ContractPage() {
                 Scheduled
               </Pill>
             ) : started ? (
-              <Pill tone="accent">
-                <span aria-hidden className="size-1.5 rounded-full bg-accent" />
-                Active
-              </Pill>
+              <div className="flex items-center gap-2">
+                <Pill tone="accent">
+                  <span aria-hidden className="size-1.5 rounded-full bg-accent" />
+                  Active
+                </Pill>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const confirmed = confirm(
+                      `⚠️ WARNING: Withdrawing from Contract #${contract.number || contract.id} will permanently reset all your progress, verified objectives, and standings on this contract.\n\nAre you sure you want to leave and reset your progress?`
+                    )
+                    if (confirmed) {
+                      setStarted(false)
+                      await contractApi.leaveContract(contract.number || contract.id, user?.id)
+                      // Reset local contract objective states
+                      if (contract && Array.isArray(contract.objectives)) {
+                        contract.objectives.forEach((o: any) => {
+                          o.current = 0
+                          o.status = 'in_progress'
+                        })
+                      }
+                      loadActive()
+                    }
+                  }}
+                  className="rounded-lg border border-line bg-surface px-2.5 py-1 text-xs font-medium text-muted hover:border-extreme hover:text-extreme transition-colors"
+                  title="Withdraw from contract"
+                >
+                  Leave Contract
+                </button>
+              </div>
             ) : (
-              <Pill>Not started</Pill>
+              <div className="flex items-center gap-2">
+                <Pill>Not started</Pill>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setStarted(true)
+                    try {
+                      await contractApi.startContract(contract.number || contract.id, user?.id)
+                      loadActive()
+                    } catch {}
+                  }}
+                  className={`${buttonClass()} text-xs py-1 px-3`}
+                >
+                  Start Contract
+                </button>
+              </div>
             )}
           </div>
         }
@@ -144,14 +218,8 @@ export default function ContractPage() {
       <StatStrip
         items={[
           {
-            label: contract.status === 'paused' ? 'Time (PAUSED)' : 'Time remaining',
-            value: contract.status === 'paused'
-              ? `${hms(contract.remainingMs !== undefined ? contract.remainingMs : Math.max(0, (contract.endsAt || 0) - now))} (PAUSED)`
-              : contract.status === 'completed'
-                ? 'COMPLETED'
-                : contract.status === 'cancelled'
-                  ? 'CANCELLED'
-                  : hms(Math.max(0, (contract.endsAt || Date.now() + 60000000) - now)),
+            label: getContractTimerState(contract, now).label,
+            value: getContractTimerState(contract, now).text,
           },
           {
             label: 'Your progress',
@@ -190,11 +258,70 @@ export default function ContractPage() {
               <SegmentedBar done={done} total={contract.objectives?.length || 10} />
             </div>
           )}
+          {refreshFeedback && (
+            <div className="mx-4 mb-3 rounded-lg border border-accent/40 bg-accent/10 px-3 py-2 text-xs font-medium text-accent">
+              {refreshFeedback}
+            </div>
+          )}
           <ObjectiveList
             objectives={contract.objectives || []}
             preview={!started || contract.status === 'paused' || contract.status === 'completed' || contract.status === 'cancelled'}
             onVerify={handleVerify}
+            onRefresh={handleRefreshObjective}
           />
+
+          {/* Active Logs Pulled Telemetry Section */}
+          <div className="mt-4 border-t border-line px-4 py-3 sm:px-5">
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => setShowLogsInspector((prev) => !prev)}
+                className="inline-flex items-center gap-2 text-xs font-semibold text-fg hover:text-accent"
+              >
+                <Terminal className="size-3.5 text-accent" />
+                <span>Active Ingested Logs Inspector ({lastPulledLogs.length} live logs)</span>
+                {showLogsInspector ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+              </button>
+              {lastPulledLogs.length > 0 && (
+                <span className="text-[11px] text-faint">
+                  Latest: {lastPulledLogs[0]?.occurredAt ? new Date(lastPulledLogs[0].occurredAt).toLocaleTimeString() : 'Just now'}
+                </span>
+              )}
+            </div>
+
+            {showLogsInspector && (
+              <div className="mt-3 space-y-2">
+                {lastPulledLogs.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-line bg-surface/50 p-4 text-center text-xs text-muted">
+                    No logs fetched yet. Click the <span className="text-accent font-semibold">Refresh</span> icon on any task to pull live Torn event logs.
+                  </div>
+                ) : (
+                  <div className="max-h-72 overflow-y-auto space-y-1.5 rounded-lg border border-line bg-surface/80 p-2 font-mono text-xs">
+                    {lastPulledLogs.map((log: any, lIdx: number) => {
+                      const isChurch = (log.text || '').toLowerCase().includes('church') || (log.category || '').toLowerCase().includes('church')
+                      return (
+                        <div
+                          key={log.externalId || lIdx}
+                          className={`flex items-start justify-between gap-3 rounded p-1.5 ${
+                            isChurch ? 'bg-accent/15 border border-accent/30 text-accent font-medium' : 'bg-raised/40 text-fg'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-faint shrink-0">#{lIdx + 1}</span>
+                            <span className="break-all">{log.text || log.rawText || JSON.stringify(log)}</span>
+                          </div>
+                          <span className="text-[10px] text-muted shrink-0 flex items-center gap-1">
+                            <Clock className="size-2.5" />
+                            {log.occurredAt ? new Date(log.occurredAt).toLocaleTimeString() : 'Recent'}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </Card>
 
         <div className="flex flex-col gap-5">
@@ -252,7 +379,7 @@ export default function ContractPage() {
                       {s.name}
                     </span>
                     <span className="tabular text-xs text-muted">
-                      {s.completed}/10
+                      {s.completed}/{s.total || contract.objectives?.length || 10}
                     </span>
                   </li>
                 ))}
