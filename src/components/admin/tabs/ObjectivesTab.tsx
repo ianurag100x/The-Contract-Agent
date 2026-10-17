@@ -83,27 +83,6 @@ export function ObjectivesTab({
                   isContractCancelled ? 'border-line bg-surface/50 opacity-40 cursor-not-allowed' : 'border-line bg-surface'
                 }`}
               />
-              {!isContractCancelled && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTaskModalMode('create')
-                    setEditingTaskIndex(-1)
-                    setTaskTitle('')
-                    setTaskCategory('combat')
-                    setTaskComplexity('easy')
-                    setTaskTarget(10)
-                    setTaskBounty(500000)
-                    setTaskMetric('count')
-                    setTaskLogPattern('')
-                    setTaskAgentNote('')
-                    setTaskError('')
-                  }}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-bold text-accent-ink hover:bg-accent/90"
-                >
-                  <Plus className="size-4" /> Add Task
-                </button>
-              )}
             </div>
           ) : undefined
         }
@@ -167,7 +146,18 @@ export function ObjectivesTab({
                   <tbody className="divide-y divide-line">
                     {(contract.objectives || []).map((obj, idx) => {
                       const complexity = obj.complexity || (obj.difficulty as any) || 'easy'
-                      const patternStr = obj.log_pattern || (obj.log_patterns && obj.log_patterns[0]?.template) || '—'
+                      const poolMatch = objectivePool.find(
+                        (p) =>
+                          p.title.trim().toLowerCase() === (obj.title || obj.name || '').trim().toLowerCase() ||
+                          (obj.agent_note && obj.agent_note.includes(p.objId))
+                      )
+                      const effectivePattern =
+                        obj.log_pattern ||
+                        (obj.log_patterns && obj.log_patterns[0]?.template) ||
+                        poolMatch?.log_pattern ||
+                        (poolMatch?.log_patterns && poolMatch.log_patterns[0]?.template) ||
+                        '—'
+                      const patternStr = effectivePattern
                       return (
                         <tr key={obj.id || idx} className="hover:bg-raised/20">
                           <td className="tabular px-3 py-3 font-bold text-muted">#{idx + 1}</td>
@@ -260,18 +250,39 @@ export function ObjectivesTab({
       <Card
         title="Objective Master Pool (Library)"
         action={
-          <button
-            type="button"
-            disabled={isContractCancelled}
-            onClick={randomizeBalancedObjectives}
-            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold ${
-              isContractCancelled
-                ? 'border-line bg-surface/50 text-muted opacity-40 cursor-not-allowed'
-                : 'bg-raised text-fg border-line hover:border-line-strong'
-            }`}
-          >
-            <Dices className="size-4 text-accent" /> Populate Balanced Tasks
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setTaskModalMode('create')
+                setEditingTaskIndex(-1)
+                setTaskTitle('')
+                setTaskCategory('combat')
+                setTaskComplexity('easy')
+                setTaskTarget(10)
+                setTaskBounty(500000)
+                setTaskMetric('count')
+                setTaskLogPattern('')
+                setTaskAgentNote('')
+                setTaskError('')
+              }}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-bold text-accent-ink hover:bg-accent/90"
+            >
+              <Plus className="size-4" /> Add New Task
+            </button>
+            <button
+              type="button"
+              disabled={isContractCancelled}
+              onClick={randomizeBalancedObjectives}
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold ${
+                isContractCancelled
+                  ? 'border-line bg-surface/50 text-muted opacity-40 cursor-not-allowed'
+                  : 'bg-raised text-fg border-line hover:border-line-strong'
+              }`}
+            >
+              <Dices className="size-4 text-accent" /> Populate Balanced Tasks
+            </button>
+          </div>
         }
       >
         <div className="p-4 pt-0 sm:p-5 sm:pt-0">
@@ -329,12 +340,21 @@ export function ObjectivesTab({
                       <DifficultyBadge difficulty={obj.difficulty} />
                     </div>
                     <p className="mt-2 text-sm font-semibold text-fg">{obj.title}</p>
-                    <p className="mt-1 text-[11px] text-muted">
-                      Category: <span className="text-fg">{obj.category}</span> · Target: <span className="tabular font-medium">{(obj.target ?? 0).toLocaleString()}</span>
-                    </p>
+                    <div className="mt-1 flex items-center justify-between text-[11px] text-muted">
+                      <span>Category: <span className="text-fg">{obj.category}</span></span>
+                      <span>Target: <span className="tabular font-medium text-fg">{(obj.target ?? 0).toLocaleString()}</span> ({obj.metric || 'count'})</span>
+                    </div>
                     <p className="mt-1 text-[11px] text-accent font-semibold flex items-center gap-1">
                       <DollarSign className="size-3 text-accent" /> Partial Bounty: ${(obj.partialReward || 500000).toLocaleString()}
                     </p>
+                    {Boolean(obj.log_pattern || (obj.log_patterns && obj.log_patterns[0]?.template)) && (
+                      <div className="mt-2">
+                        <span className="text-[10px] text-faint block font-medium">Log Syntax:</span>
+                        <code className="mt-0.5 block rounded bg-surface px-2 py-1 font-mono text-[10px] text-accent truncate border border-line" title={obj.log_pattern || obj.log_patterns?.[0]?.template}>
+                          {obj.log_pattern || obj.log_patterns?.[0]?.template}
+                        </code>
+                      </div>
+                    )}
                   </div>
 
                   <div className="mt-4 flex items-center justify-between pt-2 border-t border-line">

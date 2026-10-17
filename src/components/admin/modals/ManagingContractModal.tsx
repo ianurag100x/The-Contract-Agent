@@ -1,7 +1,6 @@
 import React from 'react'
 import {
   X,
-  ArrowLeft,
   Users,
   Sliders,
   Pause,
@@ -32,7 +31,7 @@ interface ManagingContractModalProps {
   setExtraBountyAmount: (amt: number) => void
   setExtraBountyReason: (reason: string) => void
   refreshContracts: () => Promise<void>
-  deleteContractFromDirectory: (contractId: number) => Promise<void>
+  deleteContractFromDirectory: (contractId: number) => Promise<boolean | void>
 }
 
 export const ManagingContractModal: React.FC<ManagingContractModalProps> = ({
@@ -338,19 +337,6 @@ export const ManagingContractModal: React.FC<ManagingContractModalProps> = ({
                 </button>
               ) : null}
 
-              {managingContractModal.status !== 'cancelled' && managingContractModal.status !== 'completed' && (
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await adminApi.executeControl('extend', { contractId: managingContractModal.id, data: { minutes: 60 } })
-                    await refreshContracts()
-                    alert(`Added +60 minutes to Contract #${managingContractModal.id}`)
-                  }}
-                  className="flex items-center justify-center gap-1.5 rounded-lg border border-line bg-surface p-2.5 font-semibold text-fg hover:border-accent hover:text-accent"
-                >
-                  <Clock className="size-3.5 text-accent" /> Extend +1h
-                </button>
-              )}
 
               {managingContractModal.status !== 'cancelled' && managingContractModal.status !== 'completed' && (
                 <button

@@ -20,7 +20,7 @@ interface ContractsTabProps {
   contractTimer: { label: string; text: string }
   contractsList: any[]
   setShowCreateContractModal: (show: boolean) => void
-  setShowExtendModal: (show: boolean) => void
+  setShowExtendModal?: (show: boolean) => void
   setShowWinnerModal: (show: boolean) => void
   setWinnerNameInput: (name: string) => void
   setManagingContractModal: (c: any) => void
@@ -161,20 +161,6 @@ export function ContractsTab({
                     <Pause className="size-4" /> Pause Contract
                   </button>
                 )}
-
-                <button
-                  type="button"
-                  disabled={contract.status === 'cancelled'}
-                  onClick={() => setShowExtendModal(true)}
-                  className={`flex flex-col items-center justify-center gap-1.5 rounded-xl border p-3 text-xs font-semibold ${
-                    contract.status === 'cancelled'
-                      ? 'border-line bg-surface/50 text-muted opacity-40 cursor-not-allowed'
-                      : 'border-line bg-raised/50 hover:border-line-strong'
-                  }`}
-                  title={contract.status === 'cancelled' ? 'Cannot extend cancelled contract' : 'Extend contract time'}
-                >
-                  <Clock className="size-4 text-accent" /> Extend Time...
-                </button>
 
                 <button
                   type="button"

@@ -34,7 +34,7 @@ interface DashboardTabProps {
   setShowCreateContractModal: (show: boolean) => void
   pauseContract: () => void
   resumeContract: () => void
-  extendDeadlineMinutes: (minutes: number) => void
+  extendDeadlineMinutes?: (minutes: number) => void
   setSelectedParticipant: (p: Participant) => void
   resolveAlert: (id: string) => void
   retryVerification: (id: string) => void
@@ -195,13 +195,6 @@ export function DashboardTab({
                     <Play className="size-3.5" /> Resume
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={() => extendDeadlineMinutes(60)}
-                  className="flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-1.5 text-xs font-medium hover:bg-raised"
-                >
-                  <Clock className="size-3.5 text-muted" /> +1h Buffer
-                </button>
               </div>
             </>
           )}
@@ -248,50 +241,8 @@ export function DashboardTab({
         </Card>
       </div>
 
-      {/* Row 3: Live Participants & Admin Alerts */}
-      <div className="grid gap-5 lg:grid-cols-12">
-        {/* 8. Live Participants Stream with Partial Rewards */}
-        <Card
-          title="Live Active Contractors"
-          action={
-            <button
-              type="button"
-              onClick={() => setActiveSection('participants')}
-              className="text-xs font-semibold text-accent hover:underline"
-            >
-              View All (482) →
-            </button>
-          }
-          className="lg:col-span-7"
-        >
-          <div className="p-4 pt-0 sm:p-5 sm:pt-0">
-            <ul className="divide-y divide-line rounded-xl border border-line bg-raised/30">
-              {participants.slice(0, 4).map((p) => (
-                <li
-                  key={p.id}
-                  onClick={() => setSelectedParticipant(p)}
-                  className="flex cursor-pointer items-center justify-between p-3 text-xs transition-colors hover:bg-raised/60"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="tabular font-bold w-6 text-muted">#{p.rank}</span>
-                    <div>
-                      <p className="font-semibold text-fg">{p.name}</p>
-                      <p className="text-[11px] text-muted">
-                        Torn ID: #{p.tornId} · <span className="text-accent font-medium">+${((p.partialRewardsEarned || 0) / 1e6).toFixed(2)}M partial</span>
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="tabular font-bold text-accent">{p.completedCount}/{p.totalCount}</span>
-                    <span className="text-[11px] text-faint">{p.lastActive}</span>
-                    <ChevronRight className="size-4 text-faint" />
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </Card>
-
+      {/* Row 3: Admin Alerts & Issues */}
+      <div className="grid gap-5">
         {/* 16. Admin Alerts & Issues */}
         <Card
           title="Admin Alerts & Issues"
@@ -300,7 +251,6 @@ export function DashboardTab({
               {activeAlertsCount} Action Required
             </span>
           }
-          className="lg:col-span-5"
         >
           <div className="p-4 pt-0 space-y-2.5 sm:p-5 sm:pt-0">
             {alerts.slice(0, 3).map((a) => (

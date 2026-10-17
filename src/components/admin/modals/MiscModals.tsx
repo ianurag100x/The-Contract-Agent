@@ -302,11 +302,20 @@ export const ObjectiveConfigModal: React.FC<ObjectiveConfigModalProps> = ({
   setEditingObjective,
   updateObjectiveInPool,
 }) => {
+  const [error, setError] = React.useState<string | null>(null)
+
   if (!editingObjective) return null
+
+  // Initialize or fetch raw pattern text
+  const currentPattern = editingObjective.log_pattern || (
+    editingObjective.log_patterns && editingObjective.log_patterns.length > 0
+      ? editingObjective.log_patterns.map((p: any) => p.template || p).join('\n')
+      : ''
+  )
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-xs">
-      <div className="w-full max-w-lg rounded-2xl border border-line bg-bg p-5 shadow-2xl space-y-4">
+      <div className="w-full max-w-lg rounded-2xl border border-line bg-bg p-5 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between border-b border-line pb-3">
           <div>
             <h3 className="text-base font-bold">Objective Configuration</h3>
@@ -314,20 +323,33 @@ export const ObjectiveConfigModal: React.FC<ObjectiveConfigModalProps> = ({
           </div>
           <button
             type="button"
-            onClick={() => setEditingObjective(null)}
+            onClick={() => {
+              setError(null)
+              setEditingObjective(null)
+            }}
             className="rounded-lg p-1.5 text-muted hover:text-fg"
           >
             <X className="size-5" />
           </button>
         </div>
 
+        {error && (
+          <div className="rounded-lg border border-extreme/30 bg-extreme/10 p-2.5 text-xs text-extreme flex items-center gap-2">
+            <AlertOctagon className="size-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
         <div className="grid gap-3 sm:grid-cols-2 text-xs">
           <div>
-            <label className="block text-muted font-medium">Objective Title</label>
+            <label className="block text-muted font-medium">Objective Title *</label>
             <input
               type="text"
               value={editingObjective.title}
-              onChange={(e) => setEditingObjective({ ...editingObjective, title: e.target.value })}
+              onChange={(e) => {
+                setError(null)
+                setEditingObjective({ ...editingObjective, title: e.target.value })
+              }}
               className="mt-1 w-full rounded-lg border border-line bg-surface px-3 py-1.5 text-fg"
             />
           </div>
@@ -363,26 +385,76 @@ export const ObjectiveConfigModal: React.FC<ObjectiveConfigModalProps> = ({
             <label className="block text-muted font-medium">Required Target</label>
             <input
               type="number"
+              min={1}
               value={editingObjective.target}
-              onChange={(e) => setEditingObjective({ ...editingObjective, target: Number(e.target.value) })}
+              onChange={(e) => setEditingObjective({ ...editingObjective, target: Math.max(1, parseInt(e.target.value, 10) || 1) })}
               className="mt-1 w-full rounded-lg border border-line bg-surface px-3 py-1.5 text-fg"
             />
           </div>
-          <div className="sm:col-span-2">
+          <div>
+            <label className="block text-muted font-medium">Metric Evaluation</label>
+            <select
+              value={editingObjective.metric || 'count'}
+              onChange={(e) => setEditingObjective({ ...editingObjective, metric: e.target.value as any })}
+              className="mt-1 w-full rounded-lg border border-line bg-surface px-3 py-1.5 text-fg"
+            >
+              <option value="count">Count (Occurrences)</option>
+              <option value="sum">Sum (Accumulate captured value)</option>
+              <option value="distinct">Distinct (Unique target entries)</option>
+            </select>
+          </div>
+          <div>
             <label className="block text-muted font-medium">Partial Bounty ($)</label>
             <input
               type="number"
+              min={0}
+              step={50000}
               value={editingObjective.partialReward || 500000}
-              onChange={(e) => setEditingObjective({ ...editingObjective, partialReward: Number(e.target.value) })}
+              onChange={(e) => setEditingObjective({ ...editingObjective, partialReward: Math.max(0, parseInt(e.target.value, 10) || 0) })}
               className="mt-1 w-full rounded-lg border border-line bg-surface px-3 py-1.5 text-fg"
             />
+          </div>
+          <div>
+            <label className="block text-muted font-medium">Agent Directive Note (Optional)</label>
+            <input
+              type="text"
+              placeholder="e.g. Target players with high rank"
+              value={editingObjective.agent_note || ''}
+              onChange={(e) => setEditingObjective({ ...editingObjective, agent_note: e.target.value })}
+              className="mt-1 w-full rounded-lg border border-line bg-surface px-3 py-1.5 text-fg"
+            />
+          </div>
+
+          <div className="sm:col-span-2">
+            <div className="flex items-center justify-between">
+              <label className="block text-muted font-medium">
+                Log Syntax Template(s) (Required for Torn Ingestion) <span className="text-extreme">*</span>
+              </label>
+              <span className="text-[11px] text-faint">One template per line</span>
+            </div>
+            <textarea
+              rows={4}
+              placeholder={'e.g.\nYou used {nerve:int} nerve successfully shoplifting from the {store:text} gaining {items:text}\nYou donated ${amount:money} to the church'}
+              value={currentPattern}
+              onChange={(e) => {
+                setError(null)
+                setEditingObjective({ ...editingObjective, log_pattern: e.target.value })
+              }}
+              className="mt-1 w-full rounded-lg border border-line bg-surface px-3 py-2 font-mono text-xs text-accent focus:border-accent focus:outline-none"
+            />
+            <p className="mt-1 text-[11px] text-faint">
+              Enter one pattern per line. Any player activity log matching this syntax will automatically verify and increment progress.
+            </p>
           </div>
         </div>
 
         <div className="flex justify-end gap-2 pt-2 border-t border-line">
           <button
             type="button"
-            onClick={() => setEditingObjective(null)}
+            onClick={() => {
+              setError(null)
+              setEditingObjective(null)
+            }}
             className={`${buttonClass('secondary')} text-xs py-1.5`}
           >
             Cancel
@@ -390,7 +462,29 @@ export const ObjectiveConfigModal: React.FC<ObjectiveConfigModalProps> = ({
           <button
             type="button"
             onClick={() => {
-              updateObjectiveInPool(editingObjective.objId, editingObjective)
+              if (!editingObjective.title?.trim()) {
+                setError('Objective Title is required.')
+                return
+              }
+              const patternVal = (editingObjective.log_pattern || '').trim()
+              if (!patternVal) {
+                setError('Log Syntax Template is required for Torn Ingestion verification.')
+                return
+              }
+
+              const rawLines = patternVal.split('\n').map((l) => l.trim()).filter(Boolean)
+              const parsedPatterns = rawLines.map((line, pIdx) => ({
+                key: `pat_${Date.now()}_${pIdx + 1}`,
+                template: line,
+              }))
+
+              updateObjectiveInPool(editingObjective.objId, {
+                ...editingObjective,
+                title: editingObjective.title.trim(),
+                log_pattern: rawLines.join('\n'),
+                log_patterns: parsedPatterns,
+              })
+              setError(null)
               setEditingObjective(null)
             }}
             className={`${buttonClass()} text-xs py-1.5`}
@@ -493,9 +587,8 @@ interface OverrideModalProps {
   overrideReason: string
   setOverrideReason: (r: string) => void
   managingContractModal: any
-  contract: any
   fetchManagedParticipants: (cId: number) => Promise<void>
-  manualOverrideTask: (userId: string, objId: string, action: string, reason: string) => Promise<void>
+  manualOverrideTask?: (userId: string, objId: string, action: string, reason: string) => Promise<void>
 }
 
 export const OverrideModal: React.FC<OverrideModalProps> = ({
@@ -506,7 +599,6 @@ export const OverrideModal: React.FC<OverrideModalProps> = ({
   managingContractModal,
   contract,
   fetchManagedParticipants,
-  manualOverrideTask,
 }) => {
   if (!overrideModal) return null
 

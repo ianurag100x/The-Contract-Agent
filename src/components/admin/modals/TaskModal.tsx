@@ -27,6 +27,7 @@ interface TaskModalProps {
   setTaskError: (v: string | null) => void
   addObjectiveToContract: (obj: any) => void
   editObjectiveInContract: (idx: number, obj: any) => void
+  addObjectiveToPool?: (obj: any) => string
 }
 
 export const TaskModal: React.FC<TaskModalProps> = ({
@@ -53,19 +54,22 @@ export const TaskModal: React.FC<TaskModalProps> = ({
   setTaskError,
   addObjectiveToContract,
   editObjectiveInContract,
+  addObjectiveToPool,
 }) => {
   if (!taskModalMode) return null
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs">
-      <div className="w-full max-w-lg rounded-2xl border border-line bg-bg p-5 shadow-2xl space-y-4">
+      <div className="w-full max-w-lg rounded-2xl border border-line bg-bg p-5 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between border-b border-line pb-3">
           <div>
             <h3 className="text-base font-bold text-fg">
-              {taskModalMode === 'create' ? 'Add Task to Contract' : `Edit Task #${editingTaskIndex + 1}`}
+              {taskModalMode === 'create' ? 'Create Pool Objective / Task' : `Edit Task #${editingTaskIndex + 1}`}
             </h3>
             <p className="text-xs text-muted">
-              Specify objective, required log syntax for real-time verification, complexity, and bounty.
+              {taskModalMode === 'create'
+                ? 'Adds a new objective to the Objective Master Pool library.'
+                : 'Specify objective, required log syntax for real-time verification, complexity, and bounty.'}
             </p>
           </div>
           <button
@@ -219,21 +223,41 @@ export const TaskModal: React.FC<TaskModalProps> = ({
               }))
 
               if (taskModalMode === 'create') {
-                addObjectiveToContract({
-                  title: taskTitle.trim(),
-                  name: taskTitle.trim(),
-                  category: taskCategory,
-                  difficulty: taskComplexity as any,
-                  complexity: taskComplexity,
-                  target: taskTarget,
-                  bounty: taskBounty,
-                  partialReward: taskBounty,
-                  metric: taskMetric,
-                  log_pattern: rawLines.join('\n'),
-                  log_patterns: parsedPatterns,
-                  agent_note: taskAgentNote.trim(),
-                  verification: 'log',
-                })
+                if (addObjectiveToPool) {
+                  addObjectiveToPool({
+                    title: taskTitle.trim(),
+                    category: taskCategory,
+                    difficulty: taskComplexity as any,
+                    target: taskTarget,
+                    bounty: taskBounty,
+                    partialReward: taskBounty,
+                    metric: taskMetric,
+                    log_pattern: rawLines.join('\n'),
+                    log_patterns: parsedPatterns,
+                    agent_note: taskAgentNote.trim(),
+                    verificationMethod: 'TORN API / Log',
+                    enabled: true,
+                    eligibleForRng: true,
+                    consecutiveAllowed: true,
+                    weight: 1.0,
+                  })
+                } else {
+                  addObjectiveToContract({
+                    title: taskTitle.trim(),
+                    name: taskTitle.trim(),
+                    category: taskCategory,
+                    difficulty: taskComplexity as any,
+                    complexity: taskComplexity,
+                    target: taskTarget,
+                    bounty: taskBounty,
+                    partialReward: taskBounty,
+                    metric: taskMetric,
+                    log_pattern: rawLines.join('\n'),
+                    log_patterns: parsedPatterns,
+                    agent_note: taskAgentNote.trim(),
+                    verification: 'log',
+                  })
+                }
               } else if (editingTaskIndex >= 0) {
                 editObjectiveInContract(editingTaskIndex, {
                   title: taskTitle.trim(),
@@ -254,7 +278,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
             }}
             className="rounded-lg bg-accent px-4 py-2 text-xs font-bold text-accent-ink hover:bg-accent/90"
           >
-            {taskModalMode === 'create' ? 'Add Task' : 'Save Changes'}
+            {taskModalMode === 'create' ? 'Add to Master Pool' : 'Save Changes'}
           </button>
         </div>
       </div>
