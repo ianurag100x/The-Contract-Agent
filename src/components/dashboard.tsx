@@ -28,7 +28,7 @@ import {
 } from '../data/agent'
 import { contractApi, dashboardApi } from '../lib/api'
 import { useNow } from '../hooks/useNow'
-import { hm, hms } from '../lib/format'
+import { getContractTimerState } from '../lib/format'
 import { contractTypeMeta } from '../lib/meta'
 import { useContractState } from '../state/contract'
 import { useAdmin } from '../state/admin'
@@ -64,9 +64,7 @@ export function ContractHero() {
 
   const now = useNow()
   const contract = activeData?.contract || adminContract
-  const remaining = contract.status === 'paused'
-    ? (contract.remainingMs !== undefined ? contract.remainingMs : Math.max(0, (contract.endsAt || 0) - now))
-    : Math.max(0, (contract.endsAt || 0) - now)
+  const timer = getContractTimerState(contract, now)
   const type = contractTypeMeta[contract.type as keyof typeof contractTypeMeta] || contractTypeMeta.standard
   const total = contract.objectives?.length || 10
   const participant = activeData?.participant
@@ -75,15 +73,48 @@ export function ContractHero() {
   const leader = standingsList.length > 0 ? standingsList[0] : null
   const you = standingsList.find((s) => s.isYou) || { rank: 1 }
 
+  const isPaused = contract.status === 'paused'
+  const isCancelled = contract.status === 'cancelled'
+  const isCompleted = contract.status === 'completed'
+
   if (!started) {
     return (
       <Card className="p-5 sm:p-6">
-        <Pill>Not started</Pill>
+        <div className="flex items-center gap-2">
+          {isPaused ? (
+            <Pill tone="hard">
+              <span aria-hidden className="size-1.5 rounded-full bg-hard" />
+              PAUSED
+            </Pill>
+          ) : isCancelled ? (
+            <Pill tone="extreme">
+              <span aria-hidden className="size-1.5 rounded-full bg-extreme" />
+              CANCELLED
+            </Pill>
+          ) : isCompleted ? (
+            <Pill>
+              <span aria-hidden className="size-1.5 rounded-full bg-fg" />
+              COMPLETED
+            </Pill>
+          ) : (
+            <Pill>Not started</Pill>
+          )}
+        </div>
         <h2 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
-          No Active Contract
+          {isCancelled
+            ? `Contract #${contract.number} Cancelled`
+            : isCompleted
+              ? `Contract #${contract.number} Concluded`
+              : `Contract #${contract.number}`}
         </h2>
         <p className="mt-1 text-sm text-muted">
-          You haven&apos;t started today&apos;s contract yet.
+          {isCancelled
+            ? 'This contract was cancelled by administration. Objectives are void.'
+            : isPaused
+              ? 'This contract is currently paused. Timers and tasks are temporarily on hold.'
+              : isCompleted
+                ? `Contract concluded. Winner: ${contract.declaredWinner || 'None declared'}`
+                : 'You haven\'t started today\'s contract yet.'}
         </p>
 
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
@@ -91,8 +122,10 @@ export function ContractHero() {
             <p className="tabular text-xl font-semibold">#{contract.number}</p>
             <p className="mt-0.5 text-xs text-muted">{total} Objectives</p>
           </Tile>
-          <Tile label="Remaining">
-            <p className="tabular text-xl font-semibold">{hms(remaining)}</p>
+          <Tile label={timer.label}>
+            <p className={`tabular text-xl font-semibold ${isPaused ? 'text-hard' : isCancelled ? 'text-extreme' : ''}`}>
+              {timer.text}
+            </p>
           </Tile>
           <div className="sm:col-span-2">
             <Tile label="Prize">
@@ -102,13 +135,23 @@ export function ContractHero() {
         </div>
 
         <div className="mt-5 flex flex-wrap gap-3">
-          <button
-            type="button"
-            onClick={() => setStarted(true)}
-            className={`${buttonClass()} w-full sm:w-auto`}
-          >
-            Start Contract
-          </button>
+          {!isCancelled && !isCompleted && (
+            <button
+              type="button"
+              disabled={isPaused}
+              onClick={async () => {
+                setStarted(true)
+                try {
+                  const { user } = (await import('../state/auth')).DEMO_PERSONAS.agent as any
+                  await contractApi.startContract(contract.number, user?.id || 'usr-4')
+                  loadData()
+                } catch {}
+              }}
+              className={`${buttonClass()} w-full sm:w-auto ${isPaused ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              Start Contract
+            </button>
+          )}
           <Link
             to="/contract"
             className={`${buttonClass('secondary')} w-full sm:w-auto`}
@@ -119,10 +162,6 @@ export function ContractHero() {
       </Card>
     )
   }
-
-  const isPaused = contract.status === 'paused'
-  const isCancelled = contract.status === 'cancelled'
-  const isCompleted = contract.status === 'completed'
 
   return (
     <Card className="p-5 sm:p-6">
@@ -165,9 +204,9 @@ export function ContractHero() {
             <SegmentedBar done={done} total={total} />
           </div>
         </Tile>
-        <Tile label={isPaused ? "Time (PAUSED)" : "Time Remaining"}>
-          <p className="tabular text-3xl font-semibold tracking-tight">
-            {isPaused ? 'PAUSED' : hms(remaining)}
+        <Tile label={timer.label}>
+          <p className={`tabular text-3xl font-semibold tracking-tight ${isPaused ? 'text-hard' : isCancelled ? 'text-extreme' : ''}`}>
+            {timer.text}
           </p>
         </Tile>
         <Tile label="Current Position">
@@ -185,11 +224,28 @@ export function ContractHero() {
         </Tile>
       </div>
 
-      <div className="mt-5">
+      <div className="mt-5 flex flex-wrap items-center gap-3">
         <Link to="/contract" className={`${buttonClass()} w-full sm:w-auto`}>
           Continue Contract
           <ArrowRight className="size-4" aria-hidden />
         </Link>
+        <button
+          type="button"
+          onClick={async () => {
+            const confirmed = confirm(
+              `⚠️ WARNING: Withdrawing from Contract #${contract.number}? All your progress, verified objectives, and leaderboard position on this contract will be reset to zero.\n\nAre you sure you want to withdraw?`
+            )
+            if (confirmed) {
+              setStarted(false)
+              const { user } = (await import('../state/auth')).DEMO_PERSONAS.agent as any
+              await contractApi.leaveContract(contract.number, user?.id || 'usr-4')
+              loadData()
+            }
+          }}
+          className={`${buttonClass('secondary')} text-xs py-2 px-3 text-muted hover:text-extreme hover:border-extreme transition-colors`}
+        >
+          Leave Contract
+        </button>
       </div>
     </Card>
   )
@@ -200,6 +256,7 @@ export function ContractHero() {
 export function ContractPreview() {
   const now = useNow()
   const { contract } = useAdmin()
+  const timer = getContractTimerState(contract, now)
   const type = contractTypeMeta[contract.type] || contractTypeMeta.standard
   const total = contract.objectives.length
   const rows: [string, string][] = [
@@ -209,7 +266,7 @@ export function ContractPreview() {
     ['Winners', contract.winnerConfig || type.winners],
     ['Prize', contract.rewards[0]?.reward || '$10M + 1× Xanax'],
     ['Agents', contract.participants.toLocaleString('en-US')],
-    ['Time Remaining', hm(Math.max(0, contract.endsAt - now))],
+    [timer.label, timer.text],
   ]
   return (
     <Card title="Today's Contract">

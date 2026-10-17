@@ -9,7 +9,12 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T | nul
       },
       ...options,
     })
+    const isJson = res.headers.get('content-type')?.includes('application/json')
     if (!res.ok) {
+      if (isJson) {
+        const errorData = await res.json()
+        return errorData as T
+      }
       console.warn(`API error ${res.status} for ${url}`)
       return null
     }
@@ -40,6 +45,16 @@ export const contractApi = {
       '/player/verify-objective',
       { method: 'POST', body: JSON.stringify({ objectiveIndex, userId, contractId }) }
     ),
+  startContract: (contractId?: number, userId = 'usr-4') =>
+    fetchJson<{ success: boolean; message: string }>('/player/start-contract', {
+      method: 'POST',
+      body: JSON.stringify({ contractId, userId }),
+    }),
+  leaveContract: (contractId?: number, userId = 'usr-4') =>
+    fetchJson<{ success: boolean; message: string }>('/player/leave-contract', {
+      method: 'POST',
+      body: JSON.stringify({ contractId, userId }),
+    }),
 }
 
 export const archiveApi = {
@@ -51,7 +66,48 @@ export const leaderboardApi = {
 }
 
 export const profileApi = {
-  getProfile: (userId?: string) => fetchJson<{ user: any; stats: any; rewards: any[] }>(`/player/profile${userId ? `?userId=${userId}` : ''}`),
+  getProfile: (userId?: string) =>
+    fetchJson<{ user: any; stats: any; rewards: any[] }>(`/player/profile${userId ? `?userId=${userId}` : ''}`),
+  saveApiKey: (apiKey: string, userId = 'usr-4') =>
+    fetchJson<{
+      success: boolean
+      valid: boolean
+      maskedKey?: string
+      verifiedUser?: { torn_user_id: number; torn_username: string; torn_level: number }
+      verifiedAt?: string
+      message?: string
+      error?: string
+    }>('/player/api-key', {
+      method: 'POST',
+      body: JSON.stringify({ apiKey, userId }),
+    }),
+  revokeApiKey: (userId = 'usr-4') =>
+    fetchJson<{ success: boolean; message: string }>('/player/api-key', {
+      method: 'DELETE',
+      body: JSON.stringify({ userId }),
+    }),
+  deleteAccount: (userId = 'usr-4') =>
+    fetchJson<{ success: boolean; message: string }>('/player/account', {
+      method: 'DELETE',
+      body: JSON.stringify({ userId }),
+    }),
+  checkTaskProgress: (contractId?: number, userId = 'usr-4', objectiveId?: string | number, objectiveIndex?: number) =>
+    fetchJson<{
+      success: boolean
+      logsScanned: number
+      evaluation: {
+        matchesFound: number
+        logsEvaluated: number
+        objectivesCompleted: any[]
+        partialRewardsCredited: number
+      }
+      sampleLogs: { occurredAt: string; text: string; category: string }[]
+      error?: string
+      message?: string
+    }>('/player/check-progress', {
+      method: 'POST',
+      body: JSON.stringify({ contractId, userId, objectiveId, objectiveIndex }),
+    }),
 }
 
 export const adminApi = {
@@ -65,6 +121,7 @@ export const adminApi = {
   getContractById: (id: number) => fetchJson<any>(`/admin/contracts/${id}`),
   updateContract: (data: any) => fetchJson<any>('/admin/contract', { method: 'PUT', body: JSON.stringify(data) }),
   createContract: (data: any) => fetchJson<any>('/admin/contract/create', { method: 'POST', body: JSON.stringify(data) }),
+  deleteContract: (id: number) => fetchJson<any>(`/admin/contracts/${id}`, { method: 'DELETE' }),
   executeControl: (action: string, data?: any) => fetchJson<any>('/admin/contract/controls', { method: 'POST', body: JSON.stringify({ action, data }) }),
 
   // Objectives & Balanced Generator
@@ -74,15 +131,17 @@ export const adminApi = {
   invalidateObjective: (contractId: number, index: number, reason?: string) => fetchJson<any>('/admin/objectives/invalidate', { method: 'POST', body: JSON.stringify({ contractId, index, reason }) }),
 
   // Participants
-  getParticipants: () => fetchJson<any[]>('/admin/participants'),
+  getParticipants: (contractId?: number) => fetchJson<any[]>(`/admin/participants${contractId ? `?contractId=${contractId}` : ''}`),
 
   // Rewards & Partial Bounties
   getRewards: () => fetchJson<any[]>('/admin/rewards'),
   executeRewardAction: (id: string, action: 'issue' | 'retry' | 'cancel') => fetchJson<any>('/admin/rewards/action', { method: 'POST', body: JSON.stringify({ id, action }) }),
 
-  // Users
+  // Users & Agents
   getUsers: () => fetchJson<any[]>('/admin/users'),
   setUserStatus: (userId: string, status: string) => fetchJson<any>(`/admin/users/${userId}/status`, { method: 'POST', body: JSON.stringify({ status }) }),
+  deleteUser: (userId: string) => fetchJson<{ success: boolean; message: string }>(`/admin/users/${userId}`, { method: 'DELETE' }),
+  checkUserApiKey: (userId: string) => fetchJson<{ success: boolean; valid: boolean; status: string; message?: string }>(`/admin/users/${userId}/check-api`, { method: 'POST' }),
 
   // Suspicious Activity
   getSuspicious: () => fetchJson<any[]>('/admin/suspicious'),
@@ -110,6 +169,25 @@ export const adminApi = {
     fetchJson<any>('/admin/torn/sync-user', { method: 'POST', body: JSON.stringify(data) }),
 
   // Spec §10.2 Admin Task Override
-  taskOverride: (data: { userId: string; contractId?: number; contractObjectiveId: string; action: string; reason: string }) =>
+  taskOverride: (data: { userId?: string; participantId?: string; contractId?: number; contractObjectiveId: string; action: string; reason: string }) =>
     fetchJson<any>('/admin/participants/task-override', { method: 'POST', body: JSON.stringify(data) }),
+
+  deleteParticipant: (participantId: string) =>
+    fetchJson<{ success: boolean; message: string }>(`/admin/participants/${participantId}`, { method: 'DELETE' }),
+
+  // Pull / Sync All Logs for all agents in contract
+  syncAllLogs: (contractId: number) =>
+    fetchJson<{
+      success: boolean
+      contractId: number
+      syncedAgents: number
+      logsScanned: number
+      matchesFound: number
+      objectivesCompleted: number
+      errors: Array<{ agent: string; error: string }>
+    }>('/admin/contracts/sync-all-logs', {
+      method: 'POST',
+      body: JSON.stringify({ contractId }),
+    }),
 }
+

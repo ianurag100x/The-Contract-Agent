@@ -1,4 +1,5 @@
-import { Check, Coins, Zap } from 'lucide-react'
+import { useState } from 'react'
+import { Check, Coins, RefreshCw, Zap } from 'lucide-react'
 import { categoryMeta } from '../lib/meta'
 import type { Objective } from '../types'
 import { DifficultyBadge, MiniBar } from './ui'
@@ -7,12 +8,16 @@ export default function ObjectiveList({
   objectives,
   preview = false,
   onVerify,
+  onRefresh,
 }: {
   objectives: (Objective & { partialReward?: number; status?: string })[]
   /** Read-only view before the agent has started: no progress, just goals. */
   preview?: boolean
   onVerify?: (index: number) => void
+  onRefresh?: (index: number, objective: any) => Promise<void> | void
 }) {
+  const [refreshingIdx, setRefreshingIdx] = useState<number | null>(null)
+
   return (
     <ol className="flex flex-col gap-2 px-3 pb-3 sm:px-4 sm:pb-4">
       {objectives.map((o, idx) => {
@@ -70,36 +75,59 @@ export default function ObjectiveList({
               </div>
             </div>
 
-            <div className="w-24 shrink-0 text-right sm:w-32">
-              {partial ? (
-                <>
-                  <p className="tabular mb-1.5 text-xs text-muted">
-                    {o.current.toLocaleString('en-US')} /{' '}
-                    {o.target.toLocaleString('en-US')}
-                  </p>
-                  <MiniBar value={o.current} max={o.target} />
-                </>
-              ) : (
-                <div className="flex flex-col items-end gap-1">
-                  <p className="tabular text-xs text-muted">
-                    {preview
-                      ? o.target > 1
-                        ? `Goal ${o.target.toLocaleString('en-US')}`
-                        : 'Goal 1'
-                      : done
-                        ? 'Verified'
-                        : 'Not started'}
-                  </p>
-                  {!preview && !done && onVerify && (
-                    <button
-                      type="button"
-                      onClick={() => onVerify(idx)}
-                      className="rounded bg-raised border border-line px-2 py-0.5 text-[10px] text-muted hover:text-accent hover:border-accent/40"
-                    >
-                      Verify Test
-                    </button>
-                  )}
-                </div>
+            <div className="flex items-center gap-2">
+              <div className="w-24 shrink-0 text-right sm:w-32">
+                {partial ? (
+                  <>
+                    <p className="tabular mb-1.5 text-xs text-muted">
+                      {o.current.toLocaleString('en-US')} /{' '}
+                      {o.target.toLocaleString('en-US')}
+                    </p>
+                    <MiniBar value={o.current} max={o.target} />
+                  </>
+                ) : (
+                  <div className="flex flex-col items-end gap-1">
+                    <p className="tabular text-xs text-muted">
+                      {preview
+                        ? o.target > 1
+                          ? `Goal ${o.target.toLocaleString('en-US')}`
+                          : 'Goal 1'
+                        : done
+                          ? 'Verified'
+                          : 'Not started'}
+                    </p>
+                    {!preview && !done && onVerify && (
+                      <button
+                        type="button"
+                        onClick={() => onVerify(idx)}
+                        className="rounded bg-raised border border-line px-2 py-0.5 text-[10px] text-muted hover:text-accent hover:border-accent/40"
+                      >
+                        Verify Test
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {!preview && !done && onRefresh && (
+                <button
+                  type="button"
+                  title="Refresh & check Torn logs for this task"
+                  disabled={refreshingIdx === idx}
+                  onClick={async () => {
+                    setRefreshingIdx(idx)
+                    try {
+                      await onRefresh(idx, o)
+                    } finally {
+                      setRefreshingIdx(null)
+                    }
+                  }}
+                  className="grid size-8 shrink-0 place-items-center rounded-lg border border-line bg-surface text-muted hover:border-accent hover:text-accent disabled:opacity-50 transition-colors"
+                >
+                  <RefreshCw
+                    className={`size-3.5 ${refreshingIdx === idx ? 'animate-spin text-accent' : ''}`}
+                  />
+                </button>
               )}
             </div>
           </li>

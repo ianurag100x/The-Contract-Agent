@@ -13,9 +13,9 @@ const Ctx = createContext<ContractState | null>(null)
 export function ContractStateProvider({ children }: { children: ReactNode }) {
   const [started, setStartedState] = useState(() => {
     try {
-      return localStorage.getItem(KEY) !== '0'
+      return localStorage.getItem(KEY) === '1'
     } catch {
-      return true
+      return false
     }
   })
 

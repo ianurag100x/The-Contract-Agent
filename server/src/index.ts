@@ -80,10 +80,20 @@ server.listen(PORT, () => {
   console.log(`[The Contract Agent] Backend API server running at http://localhost:${PORT}`)
   console.log(`[The Contract Agent] Verification Engine & Contract Scheduler active.`)
 
-  // Background World Clock Scheduler: checks for scheduled contracts reaching starts_at
-  setInterval(() => {
+  // Background World Clock Scheduler: checks for scheduled contracts reaching starts_at and contracts ending at 24:00 UTC
+  setInterval(async () => {
     try {
       const now = Date.now()
+
+      // 1. Check for Active contracts that have reached their ends_at (24:00 UTC)
+      const expiredContracts = sqliteDb.prepare("SELECT * FROM contracts WHERE status = 'active' AND ends_at <= ?").all(now) as any[]
+      for (const ec of expiredContracts) {
+        console.log(`[Scheduler] Contract #${ec.id} reached 24:00 UTC deadline (${new Date(ec.ends_at).toISOString()}). Finalizing winners...`)
+        const { contractEngine } = await import('./engine.ts')
+        contractEngine.evaluateContractAtMidnight(ec.id)
+      }
+
+      // 2. Check for Scheduled contracts reaching starts_at
       const scheduledList = sqliteDb.prepare("SELECT * FROM contracts WHERE status = 'scheduled'").all() as any[]
 
       for (const sc of scheduledList) {
@@ -92,12 +102,12 @@ server.listen(PORT, () => {
         if (!isNaN(startTime) && startTime <= now) {
           console.log(`[Scheduler] World clock reached start time for Contract #${sc.id}. Auto-activating contract...`)
 
-          // Mark any current active/paused contract as completed
-          sqliteDb.prepare(`
-            UPDATE contracts
-            SET status = 'completed', completed_at = datetime('now')
-            WHERE status IN ('active', 'paused') AND id != ?
-          `).run(sc.id)
+          // Finalize and mark any currently active contract as completed
+          const activeList = sqliteDb.prepare("SELECT * FROM contracts WHERE status IN ('active', 'paused') AND id != ?").all(sc.id) as any[]
+          const { contractEngine } = await import('./engine.ts')
+          for (const ac of activeList) {
+            contractEngine.evaluateContractAtMidnight(ac.id)
+          }
 
           // Auto-activate the scheduled contract
           sqliteDb.prepare(`
@@ -106,8 +116,8 @@ server.listen(PORT, () => {
             WHERE id = ?
           `).run(sc.id)
 
-          // Ensure active agents have participant records
-          const activeUsers = sqliteDb.prepare("SELECT * FROM users WHERE status = 'active'").all() as any[]
+          // Ensure active agents have participant records (never admin overseer)
+          const activeUsers = sqliteDb.prepare("SELECT * FROM users WHERE status = 'active' AND role = 'agent'").all() as any[]
           const insertPart = sqliteDb.prepare(`
             INSERT OR IGNORE INTO contract_participants (
               id, contract_id, user_id, torn_user_id, torn_username, status, current_rank, progress, total_objectives, partial_rewards_earned, last_activity_at
@@ -121,7 +131,7 @@ server.listen(PORT, () => {
         }
       }
     } catch (e) {
-      // Ignore background ticker errors
+      console.error('[Scheduler ticker error]:', e)
     }
   }, 10_000)
 })

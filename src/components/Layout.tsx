@@ -12,10 +12,15 @@ import {
   User,
   X,
   LogIn,
+  Sliders,
+  Layers,
+  Users,
+  Radio,
+  Megaphone,
 } from 'lucide-react'
 import { standings } from '../data/mock'
 import { useNow } from '../hooks/useNow'
-import { hms } from '../lib/format'
+import { getContractTimerState } from '../lib/format'
 import { useContractState } from '../state/contract'
 import { useAuth } from '../state/auth'
 import { useAdmin } from '../state/admin'
@@ -44,17 +49,64 @@ function Brand() {
 function StandingCard() {
   const now = useNow()
   const { started } = useContractState()
-  const { contract } = useAdmin()
-  const done = contract.objectives.filter((o) => o.current >= o.target).length
-  const you = standings.find((s) => s.isYou) || { rank: 14 }
+  const { contract: adminContract } = useAdmin()
+  const { user } = useAuth()
+  const [activeData, setActiveData] = useState<any>(null)
 
-  if (!started) {
+  useEffect(() => {
+    let mounted = true
+    const fetchProgress = async () => {
+      try {
+        const { contractApi } = await import('../lib/api')
+        const res = await contractApi.getActive(user?.id)
+        if (mounted && res) {
+          setActiveData(res)
+        }
+      } catch {}
+    }
+
+    fetchProgress()
+    const timer = setInterval(fetchProgress, 3000)
+    return () => {
+      mounted = false
+      clearInterval(timer)
+    }
+  }, [user?.id])
+
+  const contract = activeData?.contract || adminContract
+  const participant = activeData?.participant
+  const total = contract.objectives?.length || 10
+  const done = participant?.progress ?? contract.objectives?.filter((o: any) => o.current >= o.target).length ?? 0
+  const standingsList: any[] = activeData?.standings || standings
+  const you = standingsList.find((s: any) => s.isYou) || { rank: participant?.rank || 1 }
+  const timer = getContractTimerState(contract, now)
+
+  const isTerminal = contract.status === 'cancelled' || contract.status === 'completed'
+  const statusBadge = contract.status === 'paused'
+    ? 'PAUSED'
+    : contract.status === 'cancelled'
+      ? 'CANCELLED'
+      : contract.status === 'completed'
+        ? 'COMPLETED'
+        : !started
+          ? 'Not started'
+          : null
+
+  // If no contract chosen or not started: progression section is disabled
+  if (!started || isTerminal) {
     return (
-      <div className="rounded-xl border border-line bg-surface p-3.5">
-        <p className="text-xs text-muted">Contract #{contract.number}</p>
-        <p className="mt-1 text-sm font-medium">Not started</p>
-        <p className="tabular mt-1 text-xs text-muted">
-          {hms(Math.max(0, contract.endsAt - now))} left
+      <div className="rounded-xl border border-line bg-surface/50 p-3.5 opacity-60">
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-muted">Contract #{contract.number}</p>
+          <span className="rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-raised text-muted">
+            {statusBadge || 'Not Active'}
+          </span>
+        </div>
+        <p className="mt-1 text-xs text-muted font-normal">
+          Progression Disabled
+        </p>
+        <p className="mt-0.5 text-[11px] text-faint">
+          Start today's contract on the Dashboard to activate progression tracking.
         </p>
       </div>
     )
@@ -63,20 +115,22 @@ function StandingCard() {
   return (
     <Link
       to="/contract"
-      className="block rounded-xl border border-line bg-surface p-3.5 hover:border-line-strong"
+      className="block rounded-xl border border-line bg-surface p-3.5 hover:border-line-strong transition-colors"
     >
       <div className="flex items-baseline justify-between">
         <span className="text-xs text-muted">Your position</span>
         <span className="text-sm font-semibold">#{you.rank}</span>
       </div>
       <div className="mt-2.5">
-        <SegmentedBar done={done} total={contract.objectives.length} />
+        <SegmentedBar done={done} total={total} />
       </div>
       <div className="tabular mt-2.5 flex justify-between text-xs text-muted">
         <span>
-          {done} / {contract.objectives.length}
+          {done} / {total}
         </span>
-        <span>{hms(Math.max(0, contract.endsAt - now))} left</span>
+        <span className={contract.status === 'paused' ? 'text-hard font-semibold' : ''}>
+          {timer.status === 'active' ? `${timer.text} left` : timer.text}
+        </span>
       </div>
     </Link>
   )
@@ -182,8 +236,14 @@ export default function Layout() {
       ]
     : isAdmin
       ? [
-          { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
-          { to: '/admin', label: 'Admin Panel', icon: Shield, end: false },
+          { to: '/admin', label: 'Overview', icon: LayoutDashboard, end: true },
+          { to: '/admin/contracts', label: 'Contracts', icon: Sliders, end: false },
+          { to: '/admin/objectives', label: 'Objectives', icon: Layers, end: false },
+          { to: '/admin/agents', label: 'Agents', icon: Users, end: false },
+          { to: '/admin/torn-sync', label: 'Torn Log Sync', icon: Radio, end: false },
+          { to: '/admin/rewards', label: 'Rewards Ledger', icon: Trophy, end: false },
+          { to: '/admin/announcements', label: 'Announcements', icon: Megaphone, end: false },
+          { to: '/admin/alerts', label: 'Alerts & Health', icon: Shield, end: false },
           { to: '/archive', label: 'Archive', icon: Archive, end: false },
           { to: '/leaderboard', label: 'Leaderboard', icon: Trophy, end: false },
         ]
@@ -271,7 +331,7 @@ export default function Layout() {
                     <Icon
                       className={`size-[18px] ${
                         isActive
-                          ? label === 'Admin Panel'
+                          ? isAdmin
                             ? 'text-hard'
                             : 'text-accent'
                           : ''

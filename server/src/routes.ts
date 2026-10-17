@@ -8,6 +8,39 @@ export type RouteHandler = (
   res: { status: (code: number) => { json: (data: any) => void; send: (data: any) => void } }
 ) => Promise<boolean> | boolean
 
+/**
+ * Calculates start and end timestamps for Torn 24-hour UTC events.
+ * Contract start time is 00:00:00 UTC and ending time is 24:00:00 UTC.
+ * If created during the day, remaining time reflects the duration until 24:00:00 UTC.
+ */
+export function getUtcDailyTimeWindow(targetDate = new Date()): { startsAtIso: string; endsAtEpochMs: number; remainingMs: number } {
+  const year = targetDate.getUTCFullYear()
+  const month = targetDate.getUTCMonth()
+  const day = targetDate.getUTCDate()
+
+  const startUtc = new Date(Date.UTC(year, month, day, 0, 0, 0, 0))
+  const endUtc = new Date(Date.UTC(year, month, day, 23, 59, 59, 999))
+
+  // If currently after endUtc (or within 10 seconds of midnight), roll to tomorrow's daily window
+  let endsAtMs = endUtc.getTime()
+  let startsAtIso = startUtc.toISOString()
+  const now = Date.now()
+
+  if (now >= endsAtMs) {
+    const nextDayStart = new Date(Date.UTC(year, month, day + 1, 0, 0, 0, 0))
+    const nextDayEnd = new Date(Date.UTC(year, month, day + 1, 23, 59, 59, 999))
+    startsAtIso = nextDayStart.toISOString()
+    endsAtMs = nextDayEnd.getTime()
+  }
+
+  const remainingMs = Math.max(0, endsAtMs - now)
+  return {
+    startsAtIso,
+    endsAtEpochMs: endsAtMs,
+    remainingMs,
+  }
+}
+
 export async function handleApiRoute(
   req: { method: string; path: string; query: Record<string, string>; body: any; headers: Record<string, string> },
   res: { status: (code: number) => { json: (data: any) => void; send: (data: any) => void } }
@@ -91,7 +124,11 @@ export async function handleApiRoute(
   // 3. Current Contract (Section 2, 3)
   if (urlPath === '/api/admin/contract' && method === 'GET') {
     try {
-      const contractRow = sqliteDb.prepare('SELECT * FROM contracts ORDER BY id DESC LIMIT 1').get() as any
+      // Find the currently active or paused contract, or next scheduled contract. Completed/cancelled contracts are NOT the active contract!
+      let contractRow = sqliteDb.prepare("SELECT * FROM contracts WHERE status IN ('active', 'paused') ORDER BY id DESC LIMIT 1").get() as any
+      if (!contractRow) {
+        contractRow = sqliteDb.prepare("SELECT * FROM contracts WHERE status = 'scheduled' ORDER BY id DESC LIMIT 1").get() as any
+      }
       if (contractRow) {
         const objRows = sqliteDb.prepare('SELECT * FROM contract_objectives WHERE contract_id = ? ORDER BY objective_order ASC').all(contractRow.id) as any[]
         const partCount = ((sqliteDb.prepare('SELECT count(*) as count FROM contract_participants WHERE contract_id = ?').get(contractRow.id) as any)?.count || 0)
@@ -106,7 +143,9 @@ export async function handleApiRoute(
           endsAt: contractRow.ends_at,
           remainingMs: contractRow.status === 'paused'
             ? (contractRow.remaining_ms !== null && contractRow.remaining_ms !== undefined ? contractRow.remaining_ms : Math.max(0, contractRow.ends_at - Date.now()))
-            : Math.max(0, contractRow.ends_at - Date.now()),
+            : (contractRow.status === 'cancelled' || contractRow.status === 'completed' || contractRow.status === 'invalid')
+              ? 0
+              : Math.max(0, contractRow.ends_at - Date.now()),
           maxObjectives: contractRow.max_objectives,
           participants: partCount,
           rewards: JSON.parse(contractRow.reward_configuration || '[]'),
@@ -205,7 +244,9 @@ export async function handleApiRoute(
           endsAt: contractRow.ends_at,
           remainingMs: contractRow.status === 'paused'
             ? (contractRow.remaining_ms !== null && contractRow.remaining_ms !== undefined ? contractRow.remaining_ms : Math.max(0, contractRow.ends_at - Date.now()))
-            : Math.max(0, contractRow.ends_at - Date.now()),
+            : (contractRow.status === 'cancelled' || contractRow.status === 'completed' || contractRow.status === 'invalid')
+              ? 0
+              : Math.max(0, contractRow.ends_at - Date.now()),
           maxObjectives: contractRow.max_objectives,
           participants: partCount,
           rewards: JSON.parse(contractRow.reward_configuration || '[]'),
@@ -244,6 +285,28 @@ export async function handleApiRoute(
     } catch (err) {
       console.error('Error getting contract by ID:', err)
       res.status(500).json({ error: 'Failed to fetch contract' })
+      return true
+    }
+  }
+
+  // 3D. Delete Contract by ID for Admin
+  if (urlPath.startsWith('/api/admin/contracts/') && method === 'DELETE') {
+    const rawId = urlPath.replace('/api/admin/contracts/', '')
+    const contractId = parseInt(rawId, 10)
+    try {
+      // Delete child records first to ensure referential integrity
+      sqliteDb.prepare('DELETE FROM contract_objectives WHERE contract_id = ?').run(contractId)
+      sqliteDb.prepare('DELETE FROM participant_objectives WHERE contract_id = ?').run(contractId)
+      sqliteDb.prepare('DELETE FROM contract_participants WHERE contract_id = ?').run(contractId)
+      sqliteDb.prepare('DELETE FROM contracts WHERE id = ?').run(contractId)
+
+      logAudit('Deleted Contract', 'contract', `#${contractId}`, `Contract #${contractId} and related task/participant records were deleted by admin.`, 'danger')
+
+      res.status(200).json({ success: true, message: `Contract #${contractId} deleted successfully` })
+      return true
+    } catch (err) {
+      console.error('Error deleting contract:', err)
+      res.status(500).json({ error: 'Failed to delete contract' })
       return true
     }
   }
@@ -339,12 +402,15 @@ export async function handleApiRoute(
   // 4. Contract Creation (Section 4)
   if (urlPath === '/api/admin/contract/create' && method === 'POST') {
     const requestedStatus = body.status || 'draft'
+    // Anchor contract start to 00:00:00 UTC and end to 24:00:00 UTC of the day
+    const utcDaily = getUtcDailyTimeWindow()
+
     const newContract: Contract = {
       id: Number(body.number) || 1848,
       status: requestedStatus as any,
       type: body.type || 'standard',
-      starts_at: body.starts_at || new Date().toISOString(),
-      ends_at: body.ends_at || (Date.now() + 24 * 3600 * 1000),
+      starts_at: body.starts_at || utcDaily.startsAtIso,
+      ends_at: body.ends_at ? Number(body.ends_at) : utcDaily.endsAtEpochMs,
       max_objectives: body.max_objectives || 10,
       winner_count: body.winnerConfig || '1 winner',
       created_by: 'Admin',
@@ -356,19 +422,22 @@ export async function handleApiRoute(
       generation_method: 'manual',
     }
 
+    const calculatedRemainingMs = Math.max(0, newContract.ends_at - Date.now())
+
     // Sync into SQLite
     try {
       sqliteDb.prepare(`
         INSERT OR REPLACE INTO contracts (
-          id, status, type, starts_at, ends_at, max_objectives, winner_count, created_by,
+          id, status, type, starts_at, ends_at, remaining_ms, max_objectives, winner_count, created_by,
           reward_configuration, partial_rewards_enabled, partial_reward_per_objective, generation_method, winner_status, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
       `).run(
         newContract.id,
         newContract.status,
         newContract.type,
         newContract.starts_at,
         newContract.ends_at,
+        calculatedRemainingMs,
         newContract.max_objectives,
         newContract.winner_count,
         newContract.created_by,
@@ -410,11 +479,16 @@ export async function handleApiRoute(
       case 'start':
       case 'resume': {
         newStatus = 'active'
-        // If contract was paused, compute new ends_at based on stored remaining_ms
-        const msToRun = newRemainingMs > 0 ? newRemainingMs : 24 * 3600 * 1000
-        newEndsAt = now + msToRun
-        newRemainingMs = msToRun
-        logAudit('Resumed Contract', 'contract', `#${cId}`, 'Contract status set to ACTIVE.', 'success')
+        if (targetContract.status === 'paused' && newRemainingMs > 0) {
+          // If contract was paused, compute new ends_at based on stored remaining_ms
+          newEndsAt = now + newRemainingMs
+        } else {
+          // If starting freshly, anchor to today's 24:00:00 UTC
+          const utcDaily = getUtcDailyTimeWindow()
+          newEndsAt = utcDaily.endsAtEpochMs
+          newRemainingMs = Math.max(0, newEndsAt - now)
+        }
+        logAudit('Resumed Contract', 'contract', `#${cId}`, `Contract status set to ACTIVE with ends_at ${new Date(newEndsAt).toISOString()}.`, 'success')
         break
       }
       case 'pause': {
@@ -443,6 +517,7 @@ export async function handleApiRoute(
         declaredWinner = data?.winnerName && data.winnerName.trim() !== '' ? data.winnerName.trim() : null
         winnerStatus = declaredWinner ? 'Verified Winner' : 'Completed (No Winner)'
         newRemainingMs = 0
+        newEndsAt = now
         logAudit('Ended Contract', 'contract', `#${cId}`, `Ended contract. Winner: ${declaredWinner || 'None declared'}.`, 'success')
         break
       }
@@ -450,6 +525,7 @@ export async function handleApiRoute(
         newStatus = 'cancelled'
         completedAt = new Date().toISOString()
         newRemainingMs = 0
+        newEndsAt = now
         logAudit('Cancelled Contract', 'contract', `#${cId}`, 'Contract cancelled by admin.', 'danger')
         break
       }
@@ -561,31 +637,45 @@ export async function handleApiRoute(
   // 7. Live Participants & Telemetry (Section 8, 9)
   if (urlPath === '/api/admin/participants' && method === 'GET') {
     try {
-      const participants = sqliteDb.prepare('SELECT * FROM contract_participants ORDER BY current_rank ASC').all() as any[]
+      const contractId = req.query?.contractId ? parseInt(req.query.contractId, 10) : null
+      const participants = contractId
+        ? sqliteDb.prepare('SELECT * FROM contract_participants WHERE contract_id = ? ORDER BY current_rank ASC').all(contractId) as any[]
+        : sqliteDb.prepare('SELECT * FROM contract_participants ORDER BY current_rank ASC').all() as any[]
       const pObjs = sqliteDb.prepare('SELECT * FROM participant_objectives').all() as any[]
 
       const enriched = participants.map((p) => {
+        const contractObjs = sqliteDb.prepare('SELECT * FROM contract_objectives WHERE contract_id = ? ORDER BY objective_order ASC').all(p.contract_id) as any[]
         const objectives = pObjs.filter((po) => po.participant_id === p.id)
+
+        // Map every contract objective accurately to participant progress
+        const objectivesProgress = contractObjs.map((co) => {
+          const po = objectives.find((item) => item.contract_objective_id === co.id)
+          const isDone = po ? (po.status === 'verified' || (po.current_value >= po.target_value)) : false
+          return {
+            id: co.id,
+            title: co.title,
+            category: co.category,
+            difficulty: co.difficulty,
+            current: po ? po.current_value : 0,
+            target: co.target_value,
+            partialReward: co.partial_reward || co.bounty || 500000,
+            partialRewardStatus: isDone ? 'credited' : (po?.partial_reward_status || 'unearned'),
+            verifiedAt: po?.verified_at,
+            isSuspicious: p.status === 'suspicious',
+          }
+        })
+
+        const verifiedCount = objectivesProgress.filter((op) => op.current >= op.target || op.partialRewardStatus === 'credited').length
+
         return {
           ...p,
           name: p.torn_username,
           tornId: p.torn_user_id,
           rank: p.current_rank,
-          completedCount: p.progress,
-          totalCount: p.total_objectives,
+          completedCount: p.progress !== undefined && p.progress !== null ? p.progress : verifiedCount,
+          totalCount: contractObjs.length || p.total_objectives || 10,
           lastActive: p.last_activity_at,
-          objectivesProgress: objectives.map((po, idx) => ({
-            id: po.contract_objective_id || idx + 1,
-            title: po.title,
-            category: po.category,
-            difficulty: po.difficulty,
-            current: po.current_value,
-            target: po.target_value,
-            partialReward: po.partial_reward,
-            partialRewardStatus: po.partial_reward_status,
-            verifiedAt: po.verified_at,
-            isSuspicious: p.status === 'suspicious' && idx > 2 && idx < 8,
-          })),
+          objectivesProgress,
         }
       })
 
@@ -864,7 +954,7 @@ export async function handleApiRoute(
 
   // 13C. Admin Manual Override on Agent Task (§10.2)
   if (urlPath === '/api/admin/participants/task-override' && method === 'POST') {
-    const { userId, contractId = 1847, contractObjectiveId, action, reason } = body
+    const { userId, participantId, contractId = 1847, contractObjectiveId, action, reason } = body
 
     if (!reason) {
       res.status(400).json({ error: 'Reason is mandatory for manual overrides per spec §10.2' })
@@ -872,13 +962,87 @@ export async function handleApiRoute(
     }
 
     try {
-      const target = sqliteDb.prepare(`
-        SELECT * FROM participant_objectives
-        WHERE contract_id = ? AND contract_objective_id = ?
-      `).get(contractId, contractObjectiveId) as any
+      // 1. Locate the participant
+      let participant: any = null
+      if (participantId) {
+        participant = sqliteDb.prepare('SELECT * FROM contract_participants WHERE id = ?').get(participantId) as any
+      }
+      if (!participant && userId) {
+        participant = sqliteDb.prepare('SELECT * FROM contract_participants WHERE (user_id = ? OR id = ?) AND contract_id = ?').get(userId, userId, contractId) as any
+      }
+      if (!participant && userId) {
+        const numericTornId = parseInt(String(userId).replace('usr-', ''), 10)
+        if (!isNaN(numericTornId)) {
+          participant = sqliteDb.prepare('SELECT * FROM contract_participants WHERE torn_user_id = ? AND contract_id = ?').get(numericTornId, contractId) as any
+        }
+      }
+      if (!participant && participantId) {
+        participant = sqliteDb.prepare('SELECT * FROM contract_participants WHERE user_id = ? OR torn_username = ?').get(participantId, participantId) as any
+      }
+
+      // 2. Find or create the participant objective
+      let target: any = null
+      if (participant) {
+        target = sqliteDb.prepare(`
+          SELECT * FROM participant_objectives
+          WHERE participant_id = ? AND (contract_objective_id = ? OR id = ?)
+        `).get(participant.id, String(contractObjectiveId), String(contractObjectiveId)) as any
+      }
+
+      if (!target && participant) {
+        // Also check if contractObjectiveId matches order or title in contract_objectives
+        target = sqliteDb.prepare(`
+          SELECT po.* FROM participant_objectives po
+          JOIN contract_objectives co ON po.contract_objective_id = co.id
+          WHERE po.participant_id = ? AND (co.id = ? OR co.objective_order = ? OR co.title = ?)
+        `).get(participant.id, String(contractObjectiveId), parseInt(String(contractObjectiveId), 10) || 0, String(contractObjectiveId)) as any
+      }
 
       if (!target) {
-        res.status(404).json({ error: 'Participant objective not found in SQLite database' })
+        target = sqliteDb.prepare(`
+          SELECT * FROM participant_objectives
+          WHERE contract_id = ? AND (contract_objective_id = ? OR id = ?)
+        `).get(contractId, String(contractObjectiveId), String(contractObjectiveId)) as any
+      }
+
+      // If participant objective record doesn't exist yet, lazily create it from contract_objectives
+      if (!target && participant) {
+        let co = sqliteDb.prepare(`
+          SELECT * FROM contract_objectives 
+          WHERE contract_id = ? AND (id = ? OR objective_order = ? OR title = ?)
+        `).get(contractId, String(contractObjectiveId), parseInt(String(contractObjectiveId), 10) || 0, String(contractObjectiveId)) as any
+
+        if (!co) {
+          co = sqliteDb.prepare(`
+            SELECT * FROM contract_objectives 
+            WHERE id = ? OR objective_order = ?
+          `).get(String(contractObjectiveId), parseInt(String(contractObjectiveId), 10) || 0) as any
+        }
+
+        if (co) {
+          const newPoId = `po-${participant.id}-${co.id}`
+          sqliteDb.prepare(`
+            INSERT INTO participant_objectives (
+              id, participant_id, contract_id, contract_objective_id, title, category, difficulty,
+              status, current_value, target_value, partial_reward, partial_reward_status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'in_progress', 0, ?, ?, 'unearned')
+          `).run(
+            newPoId,
+            participant.id,
+            contractId,
+            co.id,
+            co.title,
+            co.category,
+            co.difficulty,
+            co.target_value,
+            co.partial_reward || 500000
+          )
+          target = sqliteDb.prepare('SELECT * FROM participant_objectives WHERE id = ?').get(newPoId) as any
+        }
+      }
+
+      if (!target) {
+        res.status(404).json({ error: `Participant objective "${contractObjectiveId}" not found for participant.` })
         return true
       }
 
@@ -899,29 +1063,26 @@ export async function handleApiRoute(
       } else if (action === 'reset') {
         sqliteDb.prepare(`
           UPDATE participant_objectives
-          SET status = 'pending', current_value = 0, verified_at = NULL, partial_reward_status = 'unearned'
+          SET status = 'in_progress', current_value = 0, verified_at = NULL, partial_reward_status = 'unearned'
           WHERE id = ?
         `).run(target.id)
         logAudit('Manual Reset', 'override', String(contractObjectiveId), `Admin reset objective progress. Reason: ${reason}`, 'danger')
-      } else if (action === 'delete') {
-        sqliteDb.prepare('DELETE FROM participant_objectives WHERE id = ?').run(target.id)
-        logAudit('Manual Delete Task', 'override', String(contractObjectiveId), `Admin deleted task from participant. Reason: ${reason}`, 'danger')
       }
 
       // Recompute participant progress in SQLite
       const verifiedCount = (sqliteDb.prepare(`
         SELECT count(*) as count FROM participant_objectives
-        WHERE participant_id = ? AND status = 'verified'
+        WHERE participant_id = ? AND (status = 'verified' OR current_value >= target_value)
       `).get(target.participant_id) as any)?.count || 0
 
       const totalRewards = (sqliteDb.prepare(`
         SELECT sum(partial_reward) as total FROM participant_objectives
-        WHERE participant_id = ? AND status = 'verified'
+        WHERE participant_id = ? AND (status = 'verified' OR current_value >= target_value)
       `).get(target.participant_id) as any)?.total || 0
 
       sqliteDb.prepare(`
         UPDATE contract_participants
-        SET progress = ?, partial_rewards_earned = ?
+        SET progress = ?, partial_rewards_earned = ?, last_activity_at = 'Just now'
         WHERE id = ?
       `).run(verifiedCount, totalRewards, target.participant_id)
 
@@ -930,6 +1091,58 @@ export async function handleApiRoute(
     } catch (err) {
       console.error('Error running task override in SQLite:', err)
       res.status(500).json({ error: String(err) })
+      return true
+    }
+  }
+
+  // 13C-2. Admin Delete / Remove Agent from Contract
+  if (urlPath.startsWith('/api/admin/participants/') && method === 'DELETE') {
+    const rawId = decodeURIComponent(urlPath.replace('/api/admin/participants/', ''))
+    try {
+      let participant = sqliteDb.prepare('SELECT * FROM contract_participants WHERE id = ?').get(rawId) as any
+      if (!participant) {
+        participant = sqliteDb.prepare('SELECT * FROM contract_participants WHERE user_id = ?').get(rawId) as any
+      }
+      if (!participant) {
+        const numId = parseInt(rawId.replace('usr-', ''), 10)
+        if (!isNaN(numId)) {
+          participant = sqliteDb.prepare('SELECT * FROM contract_participants WHERE torn_user_id = ?').get(numId) as any
+        }
+      }
+
+      if (!participant) {
+        res.status(404).json({ error: `Participant "${rawId}" not found in contract.` })
+        return true
+      }
+
+      // Delete participant's progress objectives and their entry in SQLite
+      sqliteDb.prepare('DELETE FROM participant_objectives WHERE participant_id = ?').run(participant.id)
+      sqliteDb.prepare('DELETE FROM contract_participants WHERE id = ?').run(participant.id)
+
+      // Sync memory db if exists
+      try {
+        const memoryParts = db.get('contract_participants').filter((p) => p.id !== participant.id)
+        db.set('contract_participants', memoryParts)
+        const memoryObjs = db.get('participant_objectives').filter((po) => po.participant_id !== participant.id)
+        db.set('participant_objectives', memoryObjs)
+      } catch {}
+
+      logAudit(
+        'Admin Removed Agent from Contract',
+        'participant',
+        participant.id,
+        `Admin removed agent ${participant.torn_username} (#${participant.torn_user_id}) from Contract #${participant.contract_id}.`,
+        'danger'
+      )
+
+      res.status(200).json({
+        success: true,
+        message: `Agent ${participant.torn_username} removed from Contract #${participant.contract_id}.`,
+      })
+      return true
+    } catch (err: any) {
+      console.error('Error deleting participant from contract:', err)
+      res.status(500).json({ error: String(err.message || 'Failed to delete participant') })
       return true
     }
   }
@@ -1039,34 +1252,76 @@ export async function handleApiRoute(
   // 16. Active Contract & User Progress Endpoint
   if (urlPath === '/api/contracts/active' && method === 'GET') {
     try {
-      // Find the currently active or paused contract, or next scheduled contract. Draft contracts must NOT show on user end!
+      // Find the currently active or paused contract, or next scheduled contract. Completed or cancelled contracts are NOT active!
       let activeContract = sqliteDb.prepare("SELECT * FROM contracts WHERE status IN ('active', 'paused') ORDER BY id DESC LIMIT 1").get() as any
       if (!activeContract) {
         activeContract = sqliteDb.prepare("SELECT * FROM contracts WHERE status = 'scheduled' ORDER BY id DESC LIMIT 1").get() as any
       }
-      if (!activeContract) {
-        // Check latest completed or cancelled if nothing active
-        activeContract = sqliteDb.prepare("SELECT * FROM contracts WHERE status IN ('completed', 'cancelled') ORDER BY id DESC LIMIT 1").get() as any
-      }
 
       if (activeContract) {
-        const contractObjs = sqliteDb.prepare('SELECT * FROM contract_objectives WHERE contract_id = ? ORDER BY objective_order ASC').all(activeContract.id) as any[]
-        const participants = sqliteDb.prepare('SELECT * FROM contract_participants WHERE contract_id = ? ORDER BY progress DESC').all(activeContract.id) as any[]
-
-        // Current player (Anurag / usr-4 by default)
+        // Current player (DickSlater / usr-4 by default or query param)
         const currentUserId = req.query.userId || 'usr-4'
-        const participant = participants.find((p) => p.user_id === currentUserId) || participants[0]
+
+        // Auto-enroll authenticated agent into active contract if not already enrolled
+        let user = sqliteDb.prepare('SELECT * FROM users WHERE id = ?').get(currentUserId) as any
+        if (!user && !isNaN(Number(currentUserId))) {
+          user = sqliteDb.prepare('SELECT * FROM users WHERE torn_user_id = ?').get(Number(currentUserId)) as any
+        }
+        if (!user) {
+          user = sqliteDb.prepare("SELECT * FROM users WHERE role = 'agent' ORDER BY created_at DESC LIMIT 1").get() as any
+        }
+
+        if (user && user.role === 'agent') {
+          const existingParticipant = sqliteDb.prepare('SELECT * FROM contract_participants WHERE contract_id = ? AND (user_id = ? OR torn_user_id = ?)').get(activeContract.id, user.id, user.torn_user_id) as any
+          if (!existingParticipant) {
+            const pId = `part-${activeContract.id}-${user.id}`
+            const contractObjCount = (sqliteDb.prepare('SELECT count(*) as count FROM contract_objectives WHERE contract_id = ?').get(activeContract.id) as any)?.count || 10
+            sqliteDb.prepare(`
+              INSERT OR IGNORE INTO contract_participants (
+                id, contract_id, user_id, torn_user_id, torn_username, status, current_rank, progress, total_objectives, partial_rewards_earned, last_activity_at
+              ) VALUES (?, ?, ?, ?, ?, 'active', 1, 0, ?, 0, 'Just now')
+            `).run(pId, activeContract.id, user.id, user.torn_user_id, user.torn_username, contractObjCount)
+          }
+        }
+
+        const contractObjs = sqliteDb.prepare('SELECT * FROM contract_objectives WHERE contract_id = ? ORDER BY objective_order ASC').all(activeContract.id) as any[]
+        const pObjsAll = sqliteDb.prepare('SELECT * FROM participant_objectives WHERE contract_id = ?').all(activeContract.id) as any[]
+        const participants = sqliteDb.prepare('SELECT * FROM contract_participants WHERE contract_id = ?').all(activeContract.id) as any[]
+
+        // Recalculate each participant's actual progress based on their verified objectives for this contract
+        participants.forEach((p) => {
+          const userObjs = pObjsAll.filter((po) => po.participant_id === p.id)
+          // Progress is the count of verified objectives matching the active contract's current objectives
+          const actualVerified = contractObjs.filter((co) => {
+            const po = userObjs.find((item) => item.contract_objective_id === co.id)
+            return po && (po.status === 'verified' || po.current_value >= po.target_value)
+          }).length
+
+          if (p.progress !== actualVerified || p.total_objectives !== contractObjs.length) {
+            p.progress = actualVerified
+            p.total_objectives = contractObjs.length
+            try {
+              sqliteDb.prepare('UPDATE contract_participants SET progress = ?, total_objectives = ? WHERE id = ?').run(actualVerified, contractObjs.length, p.id)
+            } catch {}
+          }
+        })
+
+        // Sort participants by progress DESC
+        participants.sort((a, b) => (b.progress || 0) - (a.progress || 0))
+
+        const participant = participants.find((p) => p.user_id === currentUserId || (user && p.user_id === user.id) || (user && p.torn_user_id === user.torn_user_id)) || participants[0]
         const pObjs = participant
-          ? (sqliteDb.prepare('SELECT * FROM participant_objectives WHERE participant_id = ?').all(participant.id) as any[])
+          ? pObjsAll.filter((po) => po.participant_id === participant.id)
           : []
 
         const standings = participants.map((p, idx) => ({
           rank: idx + 1,
           name: p.torn_username,
           completed: p.progress,
+          total: contractObjs.length,
           partialEarned: p.partial_rewards_earned || 0,
           minutes: 180 + idx * 18,
-          isYou: p.user_id === currentUserId || p.torn_username === 'Anurag',
+          isYou: p.user_id === currentUserId || (user && p.user_id === user.id) || p.torn_username === 'DickSlater' || p.torn_username === 'Anurag',
         }))
 
         res.status(200).json({
@@ -1078,7 +1333,9 @@ export async function handleApiRoute(
             endsAt: activeContract.ends_at,
             remainingMs: activeContract.status === 'paused'
               ? (activeContract.remaining_ms !== null && activeContract.remaining_ms !== undefined ? activeContract.remaining_ms : Math.max(0, activeContract.ends_at - Date.now()))
-              : Math.max(0, activeContract.ends_at - Date.now()),
+              : (activeContract.status === 'cancelled' || activeContract.status === 'completed' || activeContract.status === 'invalid')
+                ? 0
+                : Math.max(0, activeContract.ends_at - Date.now()),
             participants: participants.length,
             rewards: JSON.parse(activeContract.reward_configuration || '[]'),
             winnerStatus: activeContract.winner_status,
@@ -1124,32 +1381,49 @@ export async function handleApiRoute(
         })
         return true
       }
+
+      // No active or ongoing contract found
+      res.status(200).json(null)
+      return true
     } catch (err) {
       console.error('Error in /api/contracts/active:', err)
+      res.status(200).json(null)
+      return true
     }
   }
 
   // 17. Verify Objective & Award Partial Bounty Endpoint
   if (urlPath === '/api/player/verify-objective' && method === 'POST') {
-    const { userId = 'usr-4', contractId = 1847, objectiveIndex = 0 } = body
+    let { userId = 'usr-4', contractId, objectiveIndex = 0 } = body
+
+    let targetContractId = contractId
+    try {
+      const activeContractRow = sqliteDb.prepare("SELECT id FROM contracts WHERE status IN ('active', 'paused') ORDER BY id DESC LIMIT 1").get() as any
+      if (activeContractRow) {
+        targetContractId = activeContractRow.id
+      }
+    } catch {}
+    if (!targetContractId) {
+      targetContractId = contractId || 1847
+    }
 
     try {
-      const participant = sqliteDb.prepare('SELECT * FROM contract_participants WHERE contract_id = ? AND user_id = ?').get(contractId, userId) as any
-      const contractObjs = sqliteDb.prepare('SELECT * FROM contract_objectives WHERE contract_id = ? ORDER BY objective_order ASC').all(contractId) as any[]
+      const participant = sqliteDb.prepare('SELECT * FROM contract_participants WHERE contract_id = ? AND user_id = ?').get(targetContractId, userId) as any
+      const contractObjs = sqliteDb.prepare('SELECT * FROM contract_objectives WHERE contract_id = ? ORDER BY objective_order ASC').all(targetContractId) as any[]
       const targetObj = contractObjs[objectiveIndex] || contractObjs[0]
 
       if (!participant) {
         // Create participant on the fly
         const user = sqliteDb.prepare('SELECT * FROM users WHERE id = ?').get(userId) as any
-        const pId = `part-${contractId}-${userId}`
+        const pId = `part-${targetContractId}-${userId}`
         sqliteDb.prepare(`
           INSERT OR IGNORE INTO contract_participants (
             id, contract_id, user_id, torn_user_id, torn_username, status, current_rank, progress, total_objectives, partial_rewards_earned, last_activity_at
           ) VALUES (?, ?, ?, ?, ?, 'active', 1, 0, ?, 0, 'Just now')
-        `).run(pId, contractId, userId, user?.torn_user_id || 2849102, user?.torn_username || 'Anurag', contractObjs.length)
+        `).run(pId, targetContractId, userId, user?.torn_user_id || 2849102, user?.torn_username || 'Anurag', contractObjs.length)
       }
 
-      const activeParticipant = sqliteDb.prepare('SELECT * FROM contract_participants WHERE contract_id = ? AND user_id = ?').get(contractId, userId) as any
+      const activeParticipant = sqliteDb.prepare('SELECT * FROM contract_participants WHERE contract_id = ? AND user_id = ?').get(targetContractId, userId) as any
 
       if (activeParticipant && targetObj) {
         let targetPo = sqliteDb.prepare('SELECT * FROM participant_objectives WHERE participant_id = ? AND contract_objective_id = ?').get(activeParticipant.id, targetObj.id) as any
@@ -1161,7 +1435,7 @@ export async function handleApiRoute(
               id, participant_id, contract_id, contract_objective_id, title, category, difficulty,
               status, current_value, target_value, partial_reward, partial_reward_status
             ) VALUES (?, ?, ?, ?, ?, ?, ?, 'in_progress', 0, ?, ?, 'unearned')
-          `).run(poId, activeParticipant.id, contractId, targetObj.id, targetObj.title, targetObj.category, targetObj.difficulty, targetObj.target_value, targetObj.partial_reward || 500000)
+          `).run(poId, activeParticipant.id, targetContractId, targetObj.id, targetObj.title, targetObj.category, targetObj.difficulty, targetObj.target_value, targetObj.partial_reward || 500000)
           targetPo = sqliteDb.prepare('SELECT * FROM participant_objectives WHERE id = ?').get(poId) as any
         }
 
@@ -1193,7 +1467,7 @@ export async function handleApiRoute(
             activeParticipant.user_id,
             activeParticipant.torn_user_id,
             activeParticipant.torn_username,
-            contractId,
+            targetContractId,
             `Partial Bounty: Objective "${targetObj.title}" verified`,
             targetObj.partial_reward || 500000,
             txId
@@ -1305,11 +1579,14 @@ export async function handleApiRoute(
   if (urlPath === '/api/player/profile' && method === 'GET') {
     const currentUserId = req.query.userId || 'usr-4'
     let user = sqliteDb.prepare('SELECT * FROM users WHERE id = ?').get(currentUserId) as any
-    if (!user) {
-      user = sqliteDb.prepare("SELECT * FROM users WHERE torn_username = 'Anurag' LIMIT 1").get() as any
+    if (!user && !isNaN(Number(currentUserId))) {
+      user = sqliteDb.prepare('SELECT * FROM users WHERE torn_user_id = ?').get(Number(currentUserId)) as any
     }
     if (!user) {
-      user = { id: 'usr-4', torn_user_id: 2849102, torn_username: 'Anurag', torn_level: 48, status: 'active', role: 'agent' }
+      user = sqliteDb.prepare('SELECT * FROM users ORDER BY created_at DESC LIMIT 1').get() as any
+    }
+    if (!user) {
+      user = { id: currentUserId, torn_user_id: 0, torn_username: 'Agent', torn_level: 1, status: 'active', role: 'agent' }
     }
 
     const rewards = (sqliteDb.prepare('SELECT * FROM reward_transactions WHERE user_id = ? ORDER BY issued_at DESC').all(user.id) as any[]) || []
@@ -1321,8 +1598,17 @@ export async function handleApiRoute(
     const enteredContracts = (sqliteDb.prepare('SELECT count(*) as c FROM contract_participants WHERE user_id = ?').get(user.id) as any)?.c || 0
     const verifiedObjs = (sqliteDb.prepare("SELECT count(*) as c FROM participant_objectives po JOIN contract_participants cp ON po.participant_id = cp.id WHERE cp.user_id = ? AND po.status = 'verified'").get(user.id) as any)?.c || 0
 
+    // Mask API key for response security
+    const maskedKey = user.torn_api_key
+      ? `${user.torn_api_key.slice(0, 4)}••••••••${user.torn_api_key.slice(-4)}`
+      : null
+
     res.status(200).json({
-      user,
+      user: {
+        ...user,
+        torn_api_key: maskedKey,
+        hasApiKey: Boolean(user.torn_api_key),
+      },
       stats: {
         started: enteredContracts,
         completed: completedContracts,
@@ -1338,6 +1624,483 @@ export async function handleApiRoute(
       rewards,
     })
     return true
+  }
+
+  // 21. Player API Key Management & Authentication (§1.1, §7)
+  if (urlPath === '/api/player/api-key' && method === 'POST') {
+    const { userId = 'usr-4', apiKey } = body
+    if (!apiKey || typeof apiKey !== 'string' || !apiKey.trim()) {
+      res.status(400).json({ error: 'API key is required' })
+      return true
+    }
+
+    const { tornClient } = await import('./torn.ts')
+    const verifyResult = await tornClient.verifyApiKey(apiKey.trim())
+
+    if (!verifyResult.valid) {
+      res.status(400).json({
+        success: false,
+        valid: false,
+        error: verifyResult.error?.error || 'Invalid Torn API Key. Please verify key permissions (requires Basic / Minimal or Full access).',
+      })
+      return true
+    }
+
+    // Key is verified and valid
+    try {
+      const verifiedUser = verifyResult.user
+      const nowIso = new Date().toISOString()
+      const tornUserId = verifiedUser?.torn_user_id
+      const tornUsername = verifiedUser?.torn_username || 'Agent'
+      const tornLevel = verifiedUser?.torn_level || 1
+      const trimmedKey = apiKey.trim()
+      const maskedKey = `${trimmedKey.slice(0, 4)}••••••••${trimmedKey.slice(-4)}`
+
+      // 1. Check if user already exists by torn_user_id or userId
+      let existingUser: any = null
+      if (tornUserId) {
+        existingUser = sqliteDb.prepare('SELECT * FROM users WHERE torn_user_id = ?').get(tornUserId) as any
+      }
+      if (!existingUser && userId && userId !== 'usr-login') {
+        existingUser = sqliteDb.prepare('SELECT * FROM users WHERE id = ?').get(userId) as any
+      }
+
+      let activeUserId = existingUser?.id
+
+      if (existingUser) {
+        // Update existing user with verified Torn credentials & key
+        sqliteDb.prepare(`
+          UPDATE users
+          SET torn_api_key = ?,
+              api_key_valid = 1,
+              api_key_last_verified = ?,
+              torn_user_id = ?,
+              torn_username = ?,
+              torn_level = ?,
+              last_seen_at = 'Just now'
+          WHERE id = ?
+        `).run(trimmedKey, nowIso, tornUserId, tornUsername, tornLevel, existingUser.id)
+      } else {
+        // Create new user profile based on fetched Torn credentials
+        activeUserId = `usr-${tornUserId || Date.now()}`
+        sqliteDb.prepare(`
+          INSERT INTO users (
+            id, torn_user_id, torn_username, torn_level, status, role, torn_api_key, api_key_valid, api_key_last_verified, created_at, last_seen_at
+          ) VALUES (?, ?, ?, ?, 'active', 'agent', ?, 1, ?, ?, 'Just now')
+        `).run(activeUserId, tornUserId, tornUsername, tornLevel, trimmedKey, nowIso, nowIso)
+      }
+
+      // Also update any active contract participant records for this user or tornUserId
+      if (tornUsername && tornUserId) {
+        sqliteDb.prepare(`
+          UPDATE contract_participants
+          SET torn_username = ?, torn_user_id = ?
+          WHERE user_id = ? OR torn_user_id = ?
+        `).run(tornUsername, tornUserId, activeUserId, tornUserId)
+
+        // If an active contract is currently ongoing, enroll this agent immediately
+        const activeContract = sqliteDb.prepare("SELECT id FROM contracts WHERE status IN ('active', 'paused', 'scheduled') ORDER BY id DESC LIMIT 1").get() as any
+        if (activeContract) {
+          const existingParticipant = sqliteDb.prepare('SELECT * FROM contract_participants WHERE contract_id = ? AND (user_id = ? OR torn_user_id = ?)').get(activeContract.id, activeUserId, tornUserId) as any
+          if (!existingParticipant) {
+            const pId = `part-${activeContract.id}-${activeUserId}`
+            const contractObjCount = (sqliteDb.prepare('SELECT count(*) as count FROM contract_objectives WHERE contract_id = ?').get(activeContract.id) as any)?.count || 10
+            sqliteDb.prepare(`
+              INSERT OR IGNORE INTO contract_participants (
+                id, contract_id, user_id, torn_user_id, torn_username, status, current_rank, progress, total_objectives, partial_rewards_earned, last_activity_at
+              ) VALUES (?, ?, ?, ?, ?, 'active', 1, 0, ?, 0, 'Just now')
+            `).run(pId, activeContract.id, activeUserId, tornUserId, tornUsername, contractObjCount)
+          }
+        }
+      }
+
+      logAudit(
+        'Agent API Key Authenticated',
+        'auth',
+        activeUserId,
+        `Agent ${tornUsername} (Torn ID #${tornUserId}) successfully authenticated Torn API key.`,
+        'success'
+      )
+
+      const finalUser = {
+        id: activeUserId,
+        torn_user_id: tornUserId,
+        torn_username: tornUsername,
+        torn_level: tornLevel,
+        role: existingUser?.role || 'agent',
+      }
+
+      res.status(200).json({
+        success: true,
+        valid: true,
+        maskedKey,
+        verifiedUser: finalUser,
+        verifiedAt: nowIso,
+        message: `API Key verified successfully for ${tornUsername} (ID #${tornUserId}).`,
+      })
+      return true
+    } catch (e: any) {
+      console.error('Error saving API key to SQLite:', e)
+      res.status(500).json({ error: 'Database error saving API key' })
+      return true
+    }
+  }
+
+  // 21B. Revoke / Remove Player API Key
+  if (urlPath === '/api/player/api-key' && method === 'DELETE') {
+    const { userId = 'usr-4' } = body
+    try {
+      sqliteDb.prepare(`
+        UPDATE users
+        SET torn_api_key = NULL, api_key_valid = 0, api_key_last_verified = NULL
+        WHERE id = ?
+      `).run(userId)
+
+      logAudit('Agent API Key Revoked', 'auth', userId, `Agent ${userId} removed their stored Torn API key.`, 'warning')
+
+      res.status(200).json({ success: true, message: 'API key removed successfully.' })
+      return true
+    } catch (e: any) {
+      console.error('Error deleting API key:', e)
+      res.status(500).json({ error: 'Database error removing API key' })
+      return true
+    }
+  }
+
+  // 21C. Delete User Account Permanently
+  if (urlPath === '/api/player/account' && method === 'DELETE') {
+    const { userId = 'usr-4' } = body
+    try {
+      // Find the user first
+      const targetUser = sqliteDb.prepare('SELECT * FROM users WHERE id = ?').get(userId) as any
+
+      if (targetUser) {
+        // Delete participant objectives and participant rows associated with this user
+        sqliteDb.prepare(`
+          DELETE FROM participant_objectives
+          WHERE participant_id IN (SELECT id FROM contract_participants WHERE user_id = ?)
+        `).run(userId)
+
+        sqliteDb.prepare('DELETE FROM contract_participants WHERE user_id = ?').run(userId)
+        sqliteDb.prepare('DELETE FROM reward_transactions WHERE user_id = ?').run(userId)
+        sqliteDb.prepare('DELETE FROM player_events WHERE user_id = ?').run(userId)
+        sqliteDb.prepare('DELETE FROM security_events WHERE user_id = ?').run(userId)
+        sqliteDb.prepare('DELETE FROM users WHERE id = ?').run(userId)
+
+      logAudit(
+        'Agent Account Deleted',
+        'user_delete',
+        userId,
+        `Agent ${targetUser.torn_username} (#${targetUser.torn_user_id}) permanently deleted their account and telemetry.`,
+        'danger'
+      )
+    }
+
+    res.status(200).json({ success: true, message: 'Account deleted permanently.' })
+    return true
+  } catch (e: any) {
+    console.error('Error deleting account:', e)
+    res.status(500).json({ error: 'Database error deleting account' })
+    return true
+  }
+}
+
+  // 21E. Agent Start / Join Contract
+  if (urlPath === '/api/player/start-contract' && method === 'POST') {
+    const { userId = 'usr-4', contractId } = body
+    try {
+      let targetContractId = contractId
+      if (!targetContractId) {
+        const activeContract = sqliteDb.prepare("SELECT id FROM contracts WHERE status IN ('active', 'paused', 'scheduled') ORDER BY id DESC LIMIT 1").get() as any
+        targetContractId = activeContract?.id
+      }
+
+      if (!targetContractId) {
+        res.status(400).json({ error: 'No active contract found to join.' })
+        return true
+      }
+
+      // Find user in SQLite
+      let user = sqliteDb.prepare('SELECT * FROM users WHERE id = ?').get(userId) as any
+      if (!user && !isNaN(Number(userId))) {
+        user = sqliteDb.prepare('SELECT * FROM users WHERE torn_user_id = ?').get(Number(userId)) as any
+      }
+      if (!user) {
+        user = sqliteDb.prepare('SELECT * FROM users ORDER BY created_at DESC LIMIT 1').get() as any
+      }
+
+      const activeUserId = user ? user.id : userId
+      const tornUserId = user ? user.torn_user_id : (isNaN(Number(userId)) ? 0 : Number(userId))
+      const tornUsername = user ? user.torn_username : 'Agent'
+
+      const contractObjs = sqliteDb.prepare('SELECT * FROM contract_objectives WHERE contract_id = ? ORDER BY objective_order ASC').all(targetContractId) as any[]
+      const pId = `part-${targetContractId}-${activeUserId}`
+
+      // Check if participant record already exists
+      const existingPart = sqliteDb.prepare('SELECT * FROM contract_participants WHERE contract_id = ? AND (user_id = ? OR torn_user_id = ?)').get(targetContractId, activeUserId, tornUserId) as any
+
+      if (!existingPart) {
+        sqliteDb.prepare(`
+          INSERT INTO contract_participants (
+            id, contract_id, user_id, torn_user_id, torn_username, status, current_rank, progress, total_objectives, partial_rewards_earned, last_activity_at
+          ) VALUES (?, ?, ?, ?, ?, 'active', 1, 0, ?, 0, 'Just now')
+        `).run(pId, targetContractId, activeUserId, tornUserId, tornUsername, contractObjs.length || 10)
+
+        // Initialize participant objectives
+        const insertPo = sqliteDb.prepare(`
+          INSERT OR IGNORE INTO participant_objectives (
+            id, participant_id, contract_id, contract_objective_id, title, category, difficulty,
+            status, current_value, target_value, partial_reward, partial_reward_status
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, 'in_progress', 0, ?, ?, 'unearned')
+        `)
+
+        contractObjs.forEach((co) => {
+          insertPo.run(
+            `po-${pId}-${co.id}`,
+            pId,
+            targetContractId,
+            co.id,
+            co.title,
+            co.category,
+            co.difficulty,
+            co.target_value,
+            co.partial_reward || 500000
+          )
+        })
+
+        logAudit(
+          'Agent Started Contract',
+          'contract_start',
+          String(targetContractId),
+          `Agent ${tornUsername} (#${tornUserId}) manually started Contract #${targetContractId}.`,
+          'success'
+        )
+      }
+
+      res.status(200).json({ success: true, message: `Successfully started Contract #${targetContractId}.` })
+      return true
+    } catch (err: any) {
+      console.error('Error starting contract:', err)
+      res.status(500).json({ error: 'Database error starting contract' })
+      return true
+    }
+  }
+
+  // 21D. Agent Leave / Withdraw from Active Contract
+if (urlPath === '/api/player/leave-contract' && method === 'POST') {
+  const { userId = 'usr-4', contractId } = body
+
+  try {
+    // If contractId not specified, find the current active or paused contract
+    let targetContractId = contractId
+    if (!targetContractId) {
+      const activeContract = sqliteDb.prepare("SELECT id FROM contracts WHERE status IN ('active', 'paused', 'scheduled') ORDER BY id DESC LIMIT 1").get() as any
+      targetContractId = activeContract?.id
+    }
+
+    if (!targetContractId) {
+      res.status(400).json({ error: 'No active contract found to leave.' })
+      return true
+    }
+
+    const participant = sqliteDb.prepare('SELECT * FROM contract_participants WHERE contract_id = ? AND user_id = ?').get(targetContractId, userId) as any
+
+    if (participant) {
+      // Remove participant objectives and participation entry
+      sqliteDb.prepare('DELETE FROM participant_objectives WHERE participant_id = ?').run(participant.id)
+      sqliteDb.prepare('DELETE FROM contract_participants WHERE id = ?').run(participant.id)
+
+      logAudit(
+        'Agent Withdrew from Contract',
+        'contract_leave',
+        String(targetContractId),
+        `Agent ${participant.torn_username} (#${participant.torn_user_id}) voluntarily withdrew from Contract #${targetContractId}.`,
+        'warning'
+      )
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Successfully left Contract #${targetContractId}. You can rejoin anytime by starting the contract again.`,
+    })
+    return true
+  } catch (e: any) {
+    console.error('Error leaving contract:', e)
+    res.status(500).json({ error: 'Database error removing from contract' })
+    return true
+  }
+}
+
+  // 22. Agent Check Task Progress via Live Torn API Logs
+  if (urlPath === '/api/player/check-progress' && method === 'POST') {
+    let { userId = 'usr-4', contractId, objectiveId, objectiveIndex } = body
+    const { tornClient } = await import('./torn.ts')
+
+    // Always resolve target contract to the active/paused contract in SQLite if not specifically provided or if defaulting
+    let targetContractId = contractId
+    try {
+      const activeContractRow = sqliteDb.prepare("SELECT id FROM contracts WHERE status IN ('active', 'paused') ORDER BY id DESC LIMIT 1").get() as any
+      if (activeContractRow) {
+        targetContractId = activeContractRow.id
+      }
+    } catch {}
+    if (!targetContractId) {
+      targetContractId = contractId || 1847
+    }
+
+    // Find the user's stored API key
+    let user = sqliteDb.prepare('SELECT * FROM users WHERE id = ?').get(userId) as any
+    if (!user && !isNaN(Number(userId))) {
+      user = sqliteDb.prepare('SELECT * FROM users WHERE torn_user_id = ?').get(Number(userId)) as any
+    }
+    if (!user || !user.torn_api_key) {
+      user = sqliteDb.prepare("SELECT * FROM users WHERE torn_api_key IS NOT NULL AND api_key_valid = 1 ORDER BY last_seen_at DESC LIMIT 1").get() as any
+    }
+    const apiKey = user?.torn_api_key
+
+    if (!apiKey) {
+      res.status(400).json({
+        success: false,
+        error: 'No Torn API Key found. Please add and authenticate your API key in your Profile first.',
+      })
+      return true
+    }
+
+    // Calculate today's timeframe in TCT (UTC)
+    const nowEpoch = Math.floor(Date.now() / 1000)
+    const todayUtc = new Date()
+    todayUtc.setUTCHours(0, 0, 0, 0)
+    const startOfDayUtc = Math.floor(todayUtc.getTime() / 1000)
+
+    // Fetch user logs from Torn API v2 for today's timeframe with pagination
+    const response = await tornClient.getUserLogs({
+      key: apiKey,
+      from: startOfDayUtc,
+      to: nowEpoch,
+      limit: 100,
+      comment: 'TheContractAgentTaskProgressCheck',
+    })
+
+    if (response.error) {
+      res.status(400).json({
+        success: false,
+        error: response.error,
+        message: `Torn API error (${response.error.code}): ${response.error.error}`,
+      })
+      return true
+    }
+
+    // Evaluate normalized logs against active contract objectives (or specific objective if requested)
+    const evaluation = contractEngine.evaluateLogsForParticipant({
+      userId,
+      contractId: targetContractId,
+      logs: response.logs,
+      objectiveId,
+      objectiveIndex,
+    })
+
+    logAudit(
+      'Agent Task Verification',
+      'player_sync',
+      `User ${userId}`,
+      `Agent checked progress${objectiveId ? ` for task #${objectiveId}` : ''}: ${response.logs.length} logs scanned, ${evaluation.matchesFound} matches, ${evaluation.objectivesCompleted.length} newly completed.`,
+      evaluation.objectivesCompleted.length > 0 ? 'success' : 'normal'
+    )
+
+    res.status(200).json({
+      success: true,
+      logsScanned: response.logs.length,
+      evaluation,
+      sampleLogs: response.logs.slice(0, 30).map((l) => ({
+        occurredAt: l.occurredAt,
+        text: l.rawText,
+        category: l.category,
+        externalId: l.externalId,
+      })),
+    })
+    return true
+  }
+
+  // 23. Admin Sync / Pull All Logs for Contract (§7, §8)
+  if (urlPath === '/api/admin/contracts/sync-all-logs' && method === 'POST') {
+    const { contractId = 1847 } = body
+    const { tornClient } = await import('./torn.ts')
+
+    try {
+      const participants = sqliteDb.prepare(`
+        SELECT cp.*, u.torn_api_key 
+        FROM contract_participants cp
+        LEFT JOIN users u ON cp.user_id = u.id
+        WHERE cp.contract_id = ?
+      `).all(contractId) as any[]
+
+      let totalSyncedAgents = 0
+      let totalLogsScanned = 0
+      let totalMatches = 0
+      let totalNewlyCompleted = 0
+      const syncErrors: Array<{ agent: string; error: string }> = []
+
+      for (const p of participants) {
+        if (!p.torn_api_key) {
+          continue
+        }
+
+        const nowEpoch = Math.floor(Date.now() / 1000)
+        const todayUtc = new Date()
+        todayUtc.setUTCHours(0, 0, 0, 0)
+        const startOfDayUtc = Math.floor(todayUtc.getTime() / 1000)
+
+        const logResp = await tornClient.getUserLogs({
+          key: p.torn_api_key,
+          from: startOfDayUtc,
+          to: nowEpoch,
+          limit: 100,
+          comment: `TheContractAgentOverseerSync-${contractId}`,
+        })
+
+        if (logResp.error) {
+          syncErrors.push({
+            agent: p.torn_username,
+            error: logResp.error.error || `Code ${logResp.error.code}`,
+          })
+          continue
+        }
+
+        const evalResult = contractEngine.evaluateLogsForParticipant({
+          userId: p.user_id,
+          contractId,
+          logs: logResp.logs,
+        })
+
+        totalSyncedAgents++
+        totalLogsScanned += logResp.logs.length
+        totalMatches += evalResult.matchesFound
+        totalNewlyCompleted += evalResult.objectivesCompleted.length
+      }
+
+      logAudit(
+        'Admin Synced Contract Logs',
+        'contract_sync',
+        String(contractId),
+        `Pulled logs for ${totalSyncedAgents} agents in Contract #${contractId}. Scanned ${totalLogsScanned} logs, found ${totalMatches} matches, verified ${totalNewlyCompleted} objectives.`,
+        'success'
+      )
+
+      res.status(200).json({
+        success: true,
+        contractId,
+        syncedAgents: totalSyncedAgents,
+        logsScanned: totalLogsScanned,
+        matchesFound: totalMatches,
+        objectivesCompleted: totalNewlyCompleted,
+        errors: syncErrors,
+      })
+      return true
+    } catch (e: any) {
+      console.error('Error syncing all logs for contract:', e)
+      res.status(500).json({ error: String(e.message || e) })
+      return true
+    }
   }
 
   // Unhandled API Route

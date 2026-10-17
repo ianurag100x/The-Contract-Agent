@@ -101,6 +101,7 @@ export default function AdminPage() {
     addExtraBounty,
 
     objectivePool,
+    addObjectiveToPool,
     updateObjectiveInPool,
     randomizeBalancedObjectives,
 
@@ -318,6 +319,17 @@ export default function AdminPage() {
       return
     }
 
+    const effectivePattern =
+      poolObj.log_pattern ||
+      (poolObj.log_patterns && poolObj.log_patterns[0]?.template) ||
+      OBJECTIVE_POOL.find((d) => d.objId === poolObj.objId || d.title.trim().toLowerCase() === poolObj.title.trim().toLowerCase())?.log_pattern ||
+      ''
+
+    const effectivePatterns =
+      (poolObj.log_patterns && poolObj.log_patterns.length > 0)
+        ? poolObj.log_patterns
+        : (effectivePattern ? [{ key: `pat_${Date.now()}`, template: effectivePattern }] : [])
+
     addObjectiveToContract({
       title: poolObj.title,
       category: poolObj.category as Category,
@@ -326,10 +338,10 @@ export default function AdminPage() {
       target: poolObj.target || 1,
       bounty: poolObj.partialReward || 500000,
       partialReward: poolObj.partialReward || 500000,
-      metric: 'count',
+      metric: poolObj.metric || 'count',
       agent_note: `Imported from Objective Master Pool (${poolObj.objId})`,
-      log_pattern: '',
-      log_patterns: [],
+      log_pattern: effectivePattern,
+      log_patterns: effectivePatterns,
       verification: 'log',
     })
 
@@ -746,6 +758,7 @@ export default function AdminPage() {
         setTaskError={setTaskError}
         addObjectiveToContract={addObjectiveToContract}
         editObjectiveInContract={editObjectiveInContract}
+        addObjectiveToPool={addObjectiveToPool}
       />
 
       <AnnouncementModal

@@ -21,7 +21,10 @@ const obj = (
 export const today: Contract = {
   number: 1847,
   type: 'standard',
-  endsAt: Date.now() + (17 * 3600 + 39 * 60 + 45) * 1000,
+  endsAt: (() => {
+    const d = new Date()
+    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999)).getTime()
+  })(),
   participants: 482,
   rewards: [{ place: 'Winner', reward: '$10,000,000 + 1× Xanax' }],
   objectives: [

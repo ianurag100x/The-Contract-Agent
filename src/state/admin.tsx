@@ -143,6 +143,9 @@ export interface AdminUserRecord {
   registeredDate: string
   lastActive: string
   status: 'active' | 'suspended' | 'banned'
+  apiStatus?: 'working' | 'paused' | 'invalid' | 'missing'
+  hasActiveContract?: boolean
+  activeContractNumber?: number | null
   contractsEntered: number
   contractsCompleted: number
   wins: number
@@ -168,52 +171,556 @@ export interface ObjectivePoolItem extends Omit<Objective, 'id' | 'current'> {
 
 export const OBJECTIVE_POOL: ObjectivePoolItem[] = [
   // Combat
-  { objId: 'OBJ-001', title: 'Win 5 attacks', category: 'combat', difficulty: 'easy', target: 5, enabled: true, verificationMethod: 'TORN API / Attacks', eligibleForRng: true, consecutiveAllowed: true, weight: 1.0, partialReward: 250000 },
-  { objId: 'OBJ-002', title: 'Lose 5 attacks', category: 'combat', difficulty: 'easy', target: 5, enabled: true, verificationMethod: 'TORN API / Attacks', eligibleForRng: true, consecutiveAllowed: true, weight: 1.0, partialReward: 250000 },
-  { objId: 'OBJ-003', title: 'Achieve 3 critical hits', category: 'combat', difficulty: 'medium', target: 3, enabled: true, verificationMethod: 'TORN API / Battle Log', eligibleForRng: true, consecutiveAllowed: true, weight: 1.0, partialReward: 500000 },
-  { objId: 'OBJ-004', title: 'Make 10 successful attacks', category: 'combat', difficulty: 'medium', target: 10, enabled: true, verificationMethod: 'TORN API / Attacks', eligibleForRng: true, consecutiveAllowed: true, weight: 1.2, partialReward: 750000 },
-  { objId: 'OBJ-005', title: 'Make 20 attacks', category: 'combat', difficulty: 'medium', target: 20, enabled: true, verificationMethod: 'TORN API / Attacks', eligibleForRng: true, consecutiveAllowed: true, weight: 1.0, partialReward: 750000 },
-  { objId: 'OBJ-006', title: 'Hospitalize 10 players', category: 'combat', difficulty: 'hard', target: 10, enabled: true, verificationMethod: 'TORN API / Attacks', eligibleForRng: true, consecutiveAllowed: false, weight: 0.8, partialReward: 1000000 },
-  { objId: 'OBJ-007', title: 'Win an attack without temporary weapon', category: 'combat', difficulty: 'hard', target: 1, enabled: true, verificationMethod: 'TORN API / Battle Log', eligibleForRng: true, consecutiveAllowed: false, weight: 0.8, partialReward: 1000000 },
-  { objId: 'OBJ-008', title: 'Defeat a player 5+ levels above you', category: 'combat', difficulty: 'extreme', target: 1, enabled: true, verificationMethod: 'TORN API / Attacks + Profile', eligibleForRng: true, consecutiveAllowed: false, weight: 0.5, partialReward: 1500000 },
-  { objId: 'OBJ-009', title: 'Defeat a player with higher battle stats', category: 'combat', difficulty: 'extreme', target: 1, enabled: true, verificationMethod: 'TORN API / Battle Log', eligibleForRng: true, consecutiveAllowed: false, weight: 0.5, partialReward: 1500000 },
+  {
+    objId: 'OBJ-001',
+    title: 'Win 5 attacks',
+    category: 'combat',
+    difficulty: 'easy',
+    target: 5,
+    metric: 'count',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: true,
+    weight: 1.0,
+    partialReward: 250000,
+    log_pattern: 'Attack won: {"opponent":{opponent:text},"defender":{defender:text},"respect":{respect:number},"energy_used":{energy:int}{rest:text}}',
+  },
+  {
+    objId: 'OBJ-002',
+    title: 'Lose 5 attacks',
+    category: 'combat',
+    difficulty: 'easy',
+    target: 5,
+    metric: 'count',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: true,
+    weight: 1.0,
+    partialReward: 250000,
+    log_pattern: 'Attack lost: {"opponent":{opponent:text},"defender":{defender:text},"energy_used":{energy:int}{rest:text}}',
+  },
+  {
+    objId: 'OBJ-003',
+    title: 'Achieve 3 critical hits',
+    category: 'combat',
+    difficulty: 'medium',
+    target: 3,
+    metric: 'count',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: true,
+    weight: 1.0,
+    partialReward: 500000,
+    log_pattern: 'Attack critical hit: {"damage":{damage:number},"opponent":{opponent:text}{rest:text}}',
+  },
+  {
+    objId: 'OBJ-004',
+    title: 'Make 10 successful attacks',
+    category: 'combat',
+    difficulty: 'medium',
+    target: 10,
+    metric: 'count',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: true,
+    weight: 1.2,
+    partialReward: 750000,
+    log_pattern: 'Attack won: {"opponent":{opponent:text},"defender":{defender:text},"energy_used":{energy:int}{rest:text}}',
+  },
+  {
+    objId: 'OBJ-005',
+    title: 'Make 20 attacks',
+    category: 'combat',
+    difficulty: 'medium',
+    target: 20,
+    metric: 'count',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: true,
+    weight: 1.0,
+    partialReward: 750000,
+    log_pattern: 'Attack {result:word}: {"opponent":{opponent:text},"energy_used":{energy:int}{rest:text}}',
+  },
+  {
+    objId: 'OBJ-006',
+    title: 'Hospitalize 10 players',
+    category: 'combat',
+    difficulty: 'hard',
+    target: 10,
+    metric: 'count',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: false,
+    weight: 0.8,
+    partialReward: 1000000,
+    log_pattern: 'Attack hospitalize: {"opponent":{opponent:text},"defender":{defender:text},"energy_used":{energy:int}{rest:text}}',
+  },
+  {
+    objId: 'OBJ-007',
+    title: 'Win an attack without temporary weapon',
+    category: 'combat',
+    difficulty: 'hard',
+    target: 1,
+    metric: 'count',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: false,
+    weight: 0.8,
+    partialReward: 1000000,
+    log_pattern: 'Attack won: {"opponent":{opponent:text},"defender":{defender:text},"temporary_used":false{rest:text}}',
+  },
+  {
+    objId: 'OBJ-008',
+    title: 'Defeat a player 5+ levels above you',
+    category: 'combat',
+    difficulty: 'extreme',
+    target: 1,
+    metric: 'count',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: false,
+    weight: 0.5,
+    partialReward: 1500000,
+    log_pattern: 'Attack won: {"opponent":{opponent:text},"level_difference":{diff:int}{rest:text}}',
+  },
+  {
+    objId: 'OBJ-009',
+    title: 'Defeat a player with higher battle stats',
+    category: 'combat',
+    difficulty: 'extreme',
+    target: 1,
+    metric: 'count',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: false,
+    weight: 0.5,
+    partialReward: 1500000,
+    log_pattern: 'Attack won: {"opponent":{opponent:text},"fair_fight":{fair_fight:number}{rest:text}}',
+  },
 
   // Travel
-  { objId: 'OBJ-020', title: 'Fly using a specific airport', category: 'travel', difficulty: 'easy', target: 1, enabled: true, verificationMethod: 'TORN API / Travel Logs', eligibleForRng: true, consecutiveAllowed: true, weight: 1.0, partialReward: 250000 },
-  { objId: 'OBJ-021', title: 'Travel to Japan', category: 'travel', difficulty: 'medium', target: 1, enabled: true, verificationMethod: 'TORN API / Travel', eligibleForRng: true, consecutiveAllowed: true, weight: 1.0, partialReward: 500000 },
-  { objId: 'OBJ-022', title: 'Travel to 3 different countries', category: 'travel', difficulty: 'medium', target: 3, enabled: true, verificationMethod: 'TORN API / Travel', eligibleForRng: true, consecutiveAllowed: true, weight: 1.0, partialReward: 500000 },
-  { objId: 'OBJ-024', title: 'Fly to Switzerland twice', category: 'travel', difficulty: 'hard', target: 2, enabled: true, verificationMethod: 'TORN API / Travel', eligibleForRng: true, consecutiveAllowed: false, weight: 0.8, partialReward: 750000 },
-  { objId: 'OBJ-025', title: 'Spend 6 hours outside Torn', category: 'travel', difficulty: 'hard', target: 6, enabled: true, verificationMethod: 'TORN API / Travel Timers', eligibleForRng: true, consecutiveAllowed: false, weight: 0.8, partialReward: 750000 },
+  {
+    objId: 'OBJ-020',
+    title: 'Fly using a specific airport',
+    category: 'travel',
+    difficulty: 'easy',
+    target: 1,
+    metric: 'count',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: true,
+    weight: 1.0,
+    partialReward: 250000,
+    log_pattern: 'Travel {action:word}: {"destination":{destination:text},"flight_time":{minutes:int}{rest:text}}',
+  },
+  {
+    objId: 'OBJ-021',
+    title: 'Travel to Japan',
+    category: 'travel',
+    difficulty: 'medium',
+    target: 1,
+    metric: 'count',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: true,
+    weight: 1.0,
+    partialReward: 500000,
+    log_pattern: 'Travel arrive: {"destination":"Japan"{rest:text}}',
+  },
+  {
+    objId: 'OBJ-022',
+    title: 'Travel to 3 different countries',
+    category: 'travel',
+    difficulty: 'medium',
+    target: 3,
+    metric: 'distinct',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: true,
+    weight: 1.0,
+    partialReward: 500000,
+    log_pattern: 'Travel arrive: {"destination":{country:word}{rest:text}}',
+  },
+  {
+    objId: 'OBJ-024',
+    title: 'Fly to Switzerland twice',
+    category: 'travel',
+    difficulty: 'hard',
+    target: 2,
+    metric: 'count',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: false,
+    weight: 0.8,
+    partialReward: 750000,
+    log_pattern: 'Travel arrive: {"destination":"Switzerland"{rest:text}}',
+  },
+  {
+    objId: 'OBJ-025',
+    title: 'Spend 6 hours outside Torn',
+    category: 'travel',
+    difficulty: 'hard',
+    target: 6,
+    metric: 'sum',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: false,
+    weight: 0.8,
+    partialReward: 750000,
+    log_pattern: 'Travel stay: {"hours_abroad":{hours:int}{rest:text}}',
+  },
 
   // Energy / Items
-  { objId: 'OBJ-030', title: 'Use 5 medical items', category: 'energy', difficulty: 'easy', target: 5, enabled: true, verificationMethod: 'TORN API / Inventory & Events', eligibleForRng: true, consecutiveAllowed: true, weight: 1.0, partialReward: 200000 },
-  { objId: 'OBJ-031', title: 'Consume 3 booster items', category: 'energy', difficulty: 'easy', target: 3, enabled: true, verificationMethod: 'TORN API / Item Logs', eligibleForRng: true, consecutiveAllowed: true, weight: 1.0, partialReward: 250000 },
-  { objId: 'OBJ-032', title: 'Use 1,500 Energy', category: 'energy', difficulty: 'medium', target: 1500, enabled: true, verificationMethod: 'TORN API / User Stats', eligibleForRng: true, consecutiveAllowed: true, weight: 1.2, partialReward: 500000 },
-  { objId: 'OBJ-033', title: 'Use 5 Xanax', category: 'energy', difficulty: 'medium', target: 5, enabled: true, verificationMethod: 'TORN API / Personal Stats', eligibleForRng: true, consecutiveAllowed: true, weight: 1.0, partialReward: 500000 },
-  { objId: 'OBJ-034', title: 'Use 1,000 Energy without overdosing', category: 'energy', difficulty: 'hard', target: 1000, enabled: true, verificationMethod: 'TORN API / Telemetry', eligibleForRng: true, consecutiveAllowed: false, weight: 0.8, partialReward: 1000000 },
+  {
+    objId: 'OBJ-030',
+    title: 'Use 5 medical items',
+    category: 'energy',
+    difficulty: 'easy',
+    target: 5,
+    metric: 'count',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: true,
+    weight: 1.0,
+    partialReward: 200000,
+    log_pattern: 'Item use {item:word}: {"type":"medical"{rest:text}}',
+  },
+  {
+    objId: 'OBJ-031',
+    title: 'Consume 3 booster items',
+    category: 'energy',
+    difficulty: 'easy',
+    target: 3,
+    metric: 'count',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: true,
+    weight: 1.0,
+    partialReward: 250000,
+    log_pattern: 'Item use {item:word}: {"type":"booster"{rest:text}}',
+  },
+  {
+    objId: 'OBJ-032',
+    title: 'Use 1,500 Energy',
+    category: 'energy',
+    difficulty: 'medium',
+    target: 1500,
+    metric: 'sum',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: true,
+    weight: 1.2,
+    partialReward: 500000,
+    log_pattern: 'Gym train {stat:word}: {details:text}"energy_used":{energy:int}{rest:text}',
+  },
+  {
+    objId: 'OBJ-033',
+    title: 'Use 5 Xanax',
+    category: 'energy',
+    difficulty: 'medium',
+    target: 5,
+    metric: 'count',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: true,
+    weight: 1.0,
+    partialReward: 500000,
+    log_pattern: 'Item use Xanax: {"item_id":206{rest:text}}',
+  },
+  {
+    objId: 'OBJ-034',
+    title: 'Use 1,000 Energy without overdosing',
+    category: 'energy',
+    difficulty: 'hard',
+    target: 1000,
+    metric: 'sum',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: false,
+    weight: 0.8,
+    partialReward: 1000000,
+    log_pattern: 'Gym train {stat:word}: {details:text}"energy_used":{energy:int}{rest:text}',
+  },
 
   // Economy
-  { objId: 'OBJ-040', title: 'Buy an item from the market', category: 'economy', difficulty: 'easy', target: 1, enabled: true, verificationMethod: 'TORN API / Market Logs', eligibleForRng: true, consecutiveAllowed: true, weight: 1.0, partialReward: 200000 },
-  { objId: 'OBJ-041', title: 'Complete a trade', category: 'economy', difficulty: 'easy', target: 1, enabled: true, verificationMethod: 'TORN API / Trades', eligibleForRng: true, consecutiveAllowed: true, weight: 1.0, partialReward: 250000 },
-  { objId: 'OBJ-042', title: 'Sell an item through the item market', category: 'economy', difficulty: 'easy', target: 1, enabled: true, verificationMethod: 'TORN API / Market Logs', eligibleForRng: true, consecutiveAllowed: true, weight: 1.0, partialReward: 300000 },
-  { objId: 'OBJ-043', title: 'Spend $2M', category: 'economy', difficulty: 'medium', target: 2_000_000, enabled: true, verificationMethod: 'TORN API / Money Logs', eligibleForRng: true, consecutiveAllowed: true, weight: 1.0, partialReward: 500000 },
-  { objId: 'OBJ-044', title: 'Make $1M from item sales', category: 'economy', difficulty: 'medium', target: 1_000_000, enabled: true, verificationMethod: 'TORN API / Market Logs', eligibleForRng: true, consecutiveAllowed: true, weight: 1.0, partialReward: 500000 },
-  { objId: 'OBJ-045', title: 'Earn $5M', category: 'economy', difficulty: 'hard', target: 5_000_000, enabled: true, verificationMethod: 'TORN API / Money Logs', eligibleForRng: true, consecutiveAllowed: false, weight: 0.8, partialReward: 1000000 },
+  {
+    objId: 'OBJ-040',
+    title: 'Buy an item from the market',
+    category: 'economy',
+    difficulty: 'easy',
+    target: 1,
+    metric: 'count',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: true,
+    weight: 1.0,
+    partialReward: 200000,
+    log_pattern: 'Market buy: {"item":{item:text},"cost":{cost:money}{rest:text}}',
+  },
+  {
+    objId: 'OBJ-041',
+    title: 'Complete a trade',
+    category: 'economy',
+    difficulty: 'easy',
+    target: 1,
+    metric: 'count',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: true,
+    weight: 1.0,
+    partialReward: 250000,
+    log_pattern: 'Trade complete: {"trader":{trader:text},"trade_id":{trade_id:int}{rest:text}}',
+  },
+  {
+    objId: 'OBJ-042',
+    title: 'Sell an item through the item market',
+    category: 'economy',
+    difficulty: 'easy',
+    target: 1,
+    metric: 'count',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: true,
+    weight: 1.0,
+    partialReward: 300000,
+    log_pattern: 'Item sale: {"item":{item:text},"buyer":{buyer:text},"price":{price:money}{rest:text}}',
+  },
+  {
+    objId: 'OBJ-043',
+    title: 'Spend $2M',
+    category: 'economy',
+    difficulty: 'medium',
+    target: 2000000,
+    metric: 'sum',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: true,
+    weight: 1.0,
+    partialReward: 500000,
+    log_pattern: 'Money spent: {"amount":{amount:money},"purpose":{purpose:text}{rest:text}}',
+  },
+  {
+    objId: 'OBJ-044',
+    title: 'Make $1M from item sales',
+    category: 'economy',
+    difficulty: 'medium',
+    target: 1000000,
+    metric: 'sum',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: true,
+    weight: 1.0,
+    partialReward: 500000,
+    log_pattern: 'Item sale: {"price":{price:money}{rest:text}}',
+  },
+  {
+    objId: 'OBJ-045',
+    title: 'Earn $5M',
+    category: 'economy',
+    difficulty: 'hard',
+    target: 5000000,
+    metric: 'sum',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: false,
+    weight: 0.8,
+    partialReward: 1000000,
+    log_pattern: 'Money received: {"amount":{amount:money},"source":{source:text}{rest:text}}',
+  },
 
   // General Torn
-  { objId: 'OBJ-050', title: 'Complete 3 crimes', category: 'general', difficulty: 'easy', target: 3, enabled: true, verificationMethod: 'TORN API / Crimes 2.0', eligibleForRng: true, consecutiveAllowed: true, weight: 1.0, partialReward: 350000 },
-  { objId: 'OBJ-051', title: 'Complete 3 missions', category: 'general', difficulty: 'easy', target: 3, enabled: true, verificationMethod: 'TORN API / Missions', eligibleForRng: true, consecutiveAllowed: true, weight: 1.0, partialReward: 250000 },
-  { objId: 'OBJ-052', title: 'Visit a specific location', category: 'general', difficulty: 'easy', target: 1, enabled: true, verificationMethod: 'TORN API / Events', eligibleForRng: true, consecutiveAllowed: true, weight: 1.0, partialReward: 200000 },
-  { objId: 'OBJ-053', title: 'Complete 5 crimes', category: 'general', difficulty: 'medium', target: 5, enabled: true, verificationMethod: 'TORN API / Crimes 2.0', eligibleForRng: true, consecutiveAllowed: true, weight: 1.0, partialReward: 500000 },
-  { objId: 'OBJ-054', title: 'Train 1,000 stat points', category: 'general', difficulty: 'medium', target: 1000, enabled: true, verificationMethod: 'TORN API / Gym Trains', eligibleForRng: true, consecutiveAllowed: true, weight: 1.0, partialReward: 500000 },
-  { objId: 'OBJ-055', title: 'Complete an education course', category: 'general', difficulty: 'hard', target: 1, enabled: true, verificationMethod: 'TORN API / Education', eligibleForRng: true, consecutiveAllowed: false, weight: 0.8, partialReward: 750000 },
+  {
+    objId: 'OBJ-050',
+    title: 'Complete 3 crimes',
+    category: 'general',
+    difficulty: 'easy',
+    target: 3,
+    metric: 'count',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: true,
+    weight: 1.0,
+    partialReward: 350000,
+    log_pattern: 'Crime {action:word}: {"crime_id":{id:int}{rest:text}}',
+  },
+  {
+    objId: 'OBJ-051',
+    title: 'Complete 3 missions',
+    category: 'general',
+    difficulty: 'easy',
+    target: 3,
+    metric: 'count',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: true,
+    weight: 1.0,
+    partialReward: 250000,
+    log_pattern: 'Mission completed: {"mission":{mission:text},"credits":{credits:int}{rest:text}}',
+  },
+  {
+    objId: 'OBJ-052',
+    title: 'Visit a specific location',
+    category: 'general',
+    difficulty: 'easy',
+    target: 1,
+    metric: 'count',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: true,
+    weight: 1.0,
+    partialReward: 200000,
+    log_pattern: 'City visit: {"location":{location:text}{rest:text}}',
+  },
+  {
+    objId: 'OBJ-053',
+    title: 'Complete 5 crimes',
+    category: 'general',
+    difficulty: 'medium',
+    target: 5,
+    metric: 'count',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: true,
+    weight: 1.0,
+    partialReward: 500000,
+    log_pattern: 'Crime {action:word}: {"crime_id":{id:int}{rest:text}}',
+  },
+  {
+    objId: 'OBJ-054',
+    title: 'Train 1,000 stat points',
+    category: 'general',
+    difficulty: 'medium',
+    target: 1000,
+    metric: 'sum',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: true,
+    weight: 1.0,
+    partialReward: 500000,
+    log_pattern: 'Gym train {stat:word}: {details:text}"energy_used":{energy:int}{rest:text}',
+  },
+  {
+    objId: 'OBJ-055',
+    title: 'Complete an education course',
+    category: 'general',
+    difficulty: 'hard',
+    target: 1,
+    metric: 'count',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: false,
+    weight: 0.8,
+    partialReward: 750000,
+    log_pattern: 'Education completed: {"course":{course:text}{rest:text}}',
+  },
 
   // Faction
-  { objId: 'OBJ-060', title: 'Donate to your faction', category: 'faction', difficulty: 'easy', target: 1, enabled: true, verificationMethod: 'TORN API / Faction Vault', eligibleForRng: true, consecutiveAllowed: true, weight: 1.0, partialReward: 200000 },
-  { objId: 'OBJ-061', title: 'Make 10 faction attacks', category: 'faction', difficulty: 'medium', target: 10, enabled: true, verificationMethod: 'TORN API / Faction Warfare', eligibleForRng: true, consecutiveAllowed: true, weight: 1.0, partialReward: 750000 },
-  { objId: 'OBJ-062', title: 'Participate in a war', category: 'faction', difficulty: 'medium', target: 1, enabled: true, verificationMethod: 'TORN API / Faction Warfare', eligibleForRng: true, consecutiveAllowed: true, weight: 1.0, partialReward: 750000 },
-  { objId: 'OBJ-063', title: 'Gain 5,000 faction respect', category: 'faction', difficulty: 'hard', target: 5000, enabled: true, verificationMethod: 'TORN API / Faction Respect', eligibleForRng: true, consecutiveAllowed: false, weight: 0.8, partialReward: 1000000 },
-  { objId: 'OBJ-064', title: 'Complete a faction-related action', category: 'faction', difficulty: 'hard', target: 1, enabled: true, verificationMethod: 'TORN API / Faction Logs', eligibleForRng: true, consecutiveAllowed: false, weight: 0.8, partialReward: 1000000 },
+  {
+    objId: 'OBJ-060',
+    title: 'Donate to your faction',
+    category: 'faction',
+    difficulty: 'easy',
+    target: 1,
+    metric: 'count',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: true,
+    weight: 1.0,
+    partialReward: 200000,
+    log_pattern: 'Faction donation: {"amount":{amount:money}{rest:text}}',
+  },
+  {
+    objId: 'OBJ-061',
+    title: 'Make 10 faction attacks',
+    category: 'faction',
+    difficulty: 'medium',
+    target: 10,
+    metric: 'count',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: true,
+    weight: 1.0,
+    partialReward: 750000,
+    log_pattern: 'Faction attack: {"opponent":{opponent:text},"respect":{respect:number}{rest:text}}',
+  },
+  {
+    objId: 'OBJ-062',
+    title: 'Participate in a war',
+    category: 'faction',
+    difficulty: 'medium',
+    target: 1,
+    metric: 'count',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: true,
+    weight: 1.0,
+    partialReward: 750000,
+    log_pattern: 'Faction war hit: {"enemy_faction":{faction:text},"respect":{respect:number}{rest:text}}',
+  },
+  {
+    objId: 'OBJ-063',
+    title: 'Gain 5,000 faction respect',
+    category: 'faction',
+    difficulty: 'hard',
+    target: 5000,
+    metric: 'sum',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: false,
+    weight: 0.8,
+    partialReward: 1000000,
+    log_pattern: 'Faction respect gain: {"respect":{respect:number}{rest:text}}',
+  },
+  {
+    objId: 'OBJ-064',
+    title: 'Complete a faction-related action',
+    category: 'faction',
+    difficulty: 'hard',
+    target: 1,
+    metric: 'count',
+    enabled: true,
+    verificationMethod: 'TORN API / Log',
+    eligibleForRng: true,
+    consecutiveAllowed: false,
+    weight: 0.8,
+    partialReward: 1000000,
+    log_pattern: 'Faction {action:word}: {"details":{details:text}{rest:text}}',
+  },
 ]
 
 export interface AdminContractSettings {
@@ -261,6 +768,7 @@ interface AdminContextType {
   updateMaxObjectives: (max: number) => void
   togglePartialRewards: (enabled: boolean) => void
   createContract: (newContract: Partial<AdminContractSettings>) => void
+  deleteContractFromDirectory: (id: number) => Promise<boolean>
 
   // Task CRUD in Contract (Req 5, 6, 7)
   addObjectiveToContract: (newObj: Omit<Objective, 'id' | 'current'> & { log_pattern?: string; log_patterns?: any[] }) => void
@@ -269,6 +777,7 @@ interface AdminContextType {
 
   // Objectives Library
   objectivePool: ObjectivePoolItem[]
+  addObjectiveToPool: (newObj: Omit<ObjectivePoolItem, 'objId'>) => string
   toggleObjectiveEnabled: (objId: string) => void
   updateObjectiveInPool: (objId: string, updated: Partial<ObjectivePoolItem>) => void
   replaceObjective: (index: number, newObj: Omit<Objective, 'id' | 'current'> & { partialReward?: number }) => void
@@ -340,17 +849,49 @@ const AdminContext = createContext<AdminContextType | null>(null)
 export function AdminProvider({ children }: { children: ReactNode }) {
   // Contract
   const [contract, setContract] = useState<AdminContractSettings>(() => {
+    const d = new Date()
+    const today24Utc = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999)).getTime()
+
     try {
       const stored = localStorage.getItem('contract-agent:admin-contract-v3')
-      if (stored) return JSON.parse(stored)
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        // If stored contract is active, ensure its endsAt is aligned to today's 24:00 UTC
+        if (parsed.status === 'active' && (!parsed.endsAt || parsed.endsAt < Date.now() || parsed.endsAt > today24Utc + 86400000)) {
+          parsed.endsAt = today24Utc
+        }
+        // Ensure existing contract objectives have their log_pattern populated from OBJECTIVE_POOL if missing
+        if (parsed && Array.isArray(parsed.objectives)) {
+          let objsChanged = false
+          parsed.objectives = parsed.objectives.map((o: any) => {
+            if (!o.log_pattern) {
+              const match = OBJECTIVE_POOL.find((d) => d.title.trim().toLowerCase() === (o.title || o.name || '').trim().toLowerCase())
+              if (match?.log_pattern) {
+                objsChanged = true
+                return {
+                  ...o,
+                  metric: o.metric || match.metric || 'count',
+                  log_pattern: match.log_pattern,
+                  log_patterns: match.log_patterns || [{ key: `pat_${Date.now()}`, template: match.log_pattern }],
+                }
+              }
+            }
+            return o
+          })
+          if (objsChanged) {
+            localStorage.setItem('contract-agent:admin-contract-v3', JSON.stringify(parsed))
+          }
+        }
+        return parsed
+      }
     } catch {}
     return {
       number: initialToday.number,
       status: 'active',
       type: initialToday.type,
       winnerConfig: '1 winner',
-      startDate: 'Oct 7, 2026 — 12:00 AM',
-      endsAt: initialToday.endsAt,
+      startDate: 'Today 00:00 UTC',
+      endsAt: today24Utc,
       participants: initialToday.participants,
       rewards: initialToday.rewards,
       objectives: initialToday.objectives.map((o) => ({ ...o, partialReward: 500000 })),
@@ -364,7 +905,32 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const [objectivePool, setObjectivePool] = useState<ObjectivePoolItem[]>(() => {
     try {
       const stored = localStorage.getItem('contract-agent:admin-objpool')
-      if (stored) return JSON.parse(stored)
+      if (stored) {
+        const parsed: ObjectivePoolItem[] = JSON.parse(stored)
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Merge with master default OBJECTIVE_POOL to ensure all tasks have valid patterns
+          let modified = false
+          const merged = parsed.map((item) => {
+            if (!item.log_pattern) {
+              const defaultMatch = OBJECTIVE_POOL.find((d) => d.objId === item.objId || d.title.trim().toLowerCase() === item.title.trim().toLowerCase())
+              if (defaultMatch?.log_pattern) {
+                modified = true
+                return {
+                  ...item,
+                  metric: item.metric || defaultMatch.metric || 'count',
+                  log_pattern: defaultMatch.log_pattern,
+                  log_patterns: defaultMatch.log_patterns || [{ key: `pat_${Date.now()}`, template: defaultMatch.log_pattern }],
+                }
+              }
+            }
+            return item
+          })
+          if (modified) {
+            localStorage.setItem('contract-agent:admin-objpool', JSON.stringify(merged))
+          }
+          return merged
+        }
+      }
     } catch {}
     return OBJECTIVE_POOL
   })
@@ -571,22 +1137,32 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
     adminApi.getUsers().then((res) => {
       if (res && Array.isArray(res)) {
-        setUsers(
-          res.map((u: any) => ({
+        // Prevent duplicate entries by Torn ID
+        const seen = new Set<number>()
+        const uniqueUsers: AdminUserRecord[] = []
+        for (const u of res) {
+          const tid = u.torn_user_id || u.tornId
+          if (tid && seen.has(tid)) continue
+          if (tid) seen.add(tid)
+          uniqueUsers.push({
             id: u.id,
-            name: u.torn_username,
-            tornId: u.torn_user_id,
-            registeredDate: u.registered_at || 'Recently',
+            name: u.torn_username || u.name,
+            tornId: tid,
+            registeredDate: u.registered_at || u.created_at || 'Recently',
             lastActive: u.last_active_at || 'Just now',
             status: u.status || 'active',
+            apiStatus: u.api_key_valid ? 'working' : u.api_status ? u.api_status : u.has_api_key ? 'working' : 'missing',
+            hasActiveContract: Boolean(u.has_active_contract || u.active_contract_id || (u.contracts_entered && u.contracts_entered > u.contracts_completed)),
+            activeContractNumber: u.active_contract_number || u.active_contract_id || null,
             contractsEntered: u.contracts_entered || 0,
             contractsCompleted: u.contracts_completed || 0,
             wins: u.wins || 0,
             top3: u.top3 || 0,
             completionRate: u.completion_rate || '0.0%',
             contractHistory: [],
-          }))
-        )
+          })
+        }
+        setUsers(uniqueUsers)
       }
     })
 
@@ -695,13 +1271,28 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     addAuditLog('Max Tasks Limit Changed', `#${contract.number}`, `Max tasks set to ${max}.`, 'warning')
   }
 
-  const addObjectiveToContract = (newObj: Omit<Objective, 'id' | 'current'> & { log_pattern?: string; log_patterns?: any[] }) => {
+  const addObjectiveToContract = (newObj: Omit<Objective, 'id' | 'current'> & { log_pattern?: string; logPattern?: string; log_patterns?: any[]; objId?: string }) => {
     const currentObjs = contract.objectives || []
     const max = contract.maxObjectives || 10
     if (currentObjs.length >= max) {
       alert(`Cannot add more than ${max} objectives. Increase max tasks limit first.`)
       return
     }
+
+    // Resolve log pattern from newObj or fallback to objectivePool by title/objId
+    let pattern = newObj.log_pattern || newObj.logPattern || (newObj.log_patterns && newObj.log_patterns[0]?.template)
+    if (!pattern) {
+      const matchInPool = objectivePool.find(
+        (p) => p.title.trim().toLowerCase() === newObj.title.trim().toLowerCase() || (newObj.objId && p.objId === newObj.objId)
+      )
+      if (matchInPool?.log_pattern) {
+        pattern = matchInPool.log_pattern
+      }
+    }
+    const finalPattern = (pattern || '').trim()
+    const finalPatterns = newObj.log_patterns && newObj.log_patterns.length > 0
+      ? newObj.log_patterns
+      : (finalPattern ? [{ key: `pat_${Date.now()}`, template: finalPattern }] : [])
 
     const created: Objective = {
       id: currentObjs.length + 1,
@@ -715,8 +1306,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       bounty: newObj.bounty ?? newObj.partialReward ?? 500000,
       partialReward: newObj.partialReward ?? newObj.bounty ?? 500000,
       agent_note: newObj.agent_note || '',
-      log_pattern: newObj.log_pattern,
-      log_patterns: newObj.log_patterns || (newObj.log_pattern ? [{ key: `pat_${Date.now()}`, template: newObj.log_pattern }] : []),
+      log_pattern: finalPattern,
+      log_patterns: finalPatterns,
       metric: newObj.metric || 'count',
       verification: newObj.verification || 'log',
     }
@@ -861,7 +1452,59 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     addAuditLog('Contract Created', `#${created.number}`, `Created new ${created.type.toUpperCase()} contract tagged as ${created.status.toUpperCase()}.`, 'success')
   }
 
+  const deleteContractFromDirectory = async (id: number): Promise<boolean> => {
+    try {
+      const res = await adminApi.deleteContract(id)
+      if (res?.success) {
+        addAuditLog('Contract Deleted', `#${id}`, `Deleted contract #${id} from the contracts directory.`, 'danger')
+        await refreshContracts()
+        // If the deleted contract was the currently active view, select the newest remaining contract
+        if (contract.number === id) {
+          const updatedList = await adminApi.getContracts()
+          if (updatedList && updatedList.length > 0) {
+            await selectContract(updatedList[0].id)
+          }
+        }
+        return true
+      }
+    } catch (e) {
+      console.error('Failed to delete contract:', e)
+    }
+    return false
+  }
+
   // Objectives
+  const addObjectiveToPool = (newObj: Omit<ObjectivePoolItem, 'objId'>): string => {
+    // Generate next OBJ ID
+    let maxNum = 0
+    objectivePool.forEach((o) => {
+      const match = o.objId.match(/OBJ-(\d+)/)
+      if (match) {
+        const n = parseInt(match[1], 10)
+        if (n > maxNum) maxNum = n
+      }
+    })
+    const nextNum = maxNum + 1
+    const objId = `OBJ-${String(nextNum).padStart(3, '0')}`
+    const item: ObjectivePoolItem = {
+      ...newObj,
+      objId,
+      enabled: newObj.enabled ?? true,
+      verificationMethod: newObj.verificationMethod || 'TORN API / Log',
+      eligibleForRng: newObj.eligibleForRng ?? true,
+      consecutiveAllowed: newObj.consecutiveAllowed ?? true,
+      weight: newObj.weight ?? 1.0,
+      partialReward: newObj.partialReward || 500000,
+    }
+    const updated = [...objectivePool, item]
+    setObjectivePool(updated)
+    try {
+      localStorage.setItem('contract-agent:admin-objpool', JSON.stringify(updated))
+    } catch {}
+    addAuditLog('Objective Added to Pool', objId, `Created new pool objective "${item.title}".`, 'success')
+    return objId
+  }
+
   const toggleObjectiveEnabled = (objId: string) => {
     const updated = objectivePool.map((o) => (o.objId === objId ? { ...o, enabled: !o.enabled } : o))
     setObjectivePool(updated)
@@ -877,7 +1520,41 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     try {
       localStorage.setItem('contract-agent:admin-objpool', JSON.stringify(updated))
     } catch {}
-    addAuditLog('Objective Configured', objId, `Objective properties updated.`)
+
+    // Reflect changes everywhere: if this objective is active in the contract, update it as well
+    const poolItem = updated.find((o) => o.objId === objId)
+    if (poolItem && contract && Array.isArray(contract.objectives)) {
+      let contractChanged = false
+      const updatedContractObjs = contract.objectives.map((co) => {
+        const matches =
+          (co.agent_note && co.agent_note.includes(objId)) ||
+          co.title.trim().toLowerCase() === (updatedFields.title || poolItem.title).trim().toLowerCase()
+        if (matches) {
+          contractChanged = true
+          return {
+            ...co,
+            title: updatedFields.title ?? poolItem.title,
+            name: updatedFields.title ?? poolItem.title,
+            category: updatedFields.category ?? poolItem.category,
+            difficulty: updatedFields.difficulty ?? poolItem.difficulty,
+            complexity: (updatedFields.difficulty ?? poolItem.difficulty) as any,
+            target: updatedFields.target ?? poolItem.target,
+            bounty: updatedFields.partialReward ?? poolItem.partialReward ?? co.bounty,
+            partialReward: updatedFields.partialReward ?? poolItem.partialReward ?? co.partialReward,
+            metric: updatedFields.metric ?? poolItem.metric ?? co.metric,
+            log_pattern: updatedFields.log_pattern ?? poolItem.log_pattern,
+            log_patterns: updatedFields.log_patterns ?? poolItem.log_patterns,
+          }
+        }
+        return co
+      })
+
+      if (contractChanged) {
+        saveContract({ ...contract, objectives: updatedContractObjs })
+      }
+    }
+
+    addAuditLog('Objective Configured', objId, `Objective properties and syntax pattern updated.`)
   }
 
   const replaceObjective = (index: number, newObj: Omit<Objective, 'id' | 'current'> & { partialReward?: number }) => {
@@ -919,11 +1596,19 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     const newObjs = chosen.map((o, idx) => ({
       id: idx + 1,
       title: o.title,
+      name: o.title,
       category: o.category,
       difficulty: o.difficulty,
+      complexity: o.difficulty as any,
       target: o.target,
       current: 0,
+      bounty: o.partialReward || 500000,
       partialReward: o.partialReward || 500000,
+      metric: o.metric || 'count',
+      verification: 'log' as const,
+      log_pattern: o.log_pattern || '',
+      log_patterns: o.log_patterns || (o.log_pattern ? [{ key: `pat_${Date.now()}_${idx + 1}`, template: o.log_pattern }] : []),
+      agent_note: `Generated from Pool (${o.objId})`,
     }))
 
     saveContract({ ...contract, objectives: newObjs })
@@ -1077,6 +1762,60 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     addAuditLog('User Restored', userId, 'Player status restored to active.', 'success')
   }
 
+  const deleteUser = async (userId: string) => {
+    setUsers((prev) => prev.filter((u) => u.id !== userId))
+    await adminApi.deleteUser(userId)
+    addAuditLog('User Deleted', userId, 'Player removed from platform directory.', 'danger')
+  }
+
+  const refreshUsers = async () => {
+    const res = await adminApi.getUsers()
+    if (res && Array.isArray(res)) {
+      const seen = new Set<number>()
+      const uniqueUsers: AdminUserRecord[] = []
+      for (const u of res) {
+        const tid = u.torn_user_id || u.tornId
+        if (tid && seen.has(tid)) continue
+        if (tid) seen.add(tid)
+        uniqueUsers.push({
+          id: u.id,
+          name: u.torn_username || u.name,
+          tornId: tid,
+          registeredDate: u.registered_at || u.created_at || 'Recently',
+          lastActive: u.last_active_at || 'Just now',
+          status: u.status || 'active',
+          apiStatus: u.api_key_valid ? 'working' : u.api_status ? u.api_status : u.has_api_key ? 'working' : 'missing',
+          hasActiveContract: Boolean(u.has_active_contract || u.active_contract_id || (u.contracts_entered && u.contracts_entered > u.contracts_completed)),
+          activeContractNumber: u.active_contract_number || u.active_contract_id || null,
+          contractsEntered: u.contracts_entered || 0,
+          contractsCompleted: u.contracts_completed || 0,
+          wins: u.wins || 0,
+          top3: u.top3 || 0,
+          completionRate: u.completion_rate || '0.0%',
+          contractHistory: [],
+        })
+      }
+      setUsers(uniqueUsers)
+    }
+  }
+
+  const refreshUserApiKey = async (userId: string) => {
+    const res = await adminApi.checkUserApiKey(userId)
+    if (res) {
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === userId
+            ? {
+                ...u,
+                apiStatus: res.valid ? 'working' : (res.status as any) || 'paused',
+              }
+            : u
+        )
+      )
+    }
+    return res
+  }
+
   // Rewards
   const issueReward = (id: string) => {
     setRewardsHistory((prev) => prev.map((r) => (r.id === id ? { ...r, status: 'delivered', txId: `TX-${Date.now().toString().slice(-5)}-TN` } : r)))
@@ -1186,6 +1925,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         updateMaxObjectives,
         togglePartialRewards,
         createContract,
+        deleteContractFromDirectory,
 
         addObjectiveToContract,
         editObjectiveInContract,
@@ -1194,6 +1934,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         addExtraBounty,
 
         objectivePool,
+        addObjectiveToPool,
         toggleObjectiveEnabled,
         updateObjectiveInPool,
         replaceObjective,
@@ -1224,6 +1965,9 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         suspendUser,
         banUser,
         restoreUser,
+        deleteUser,
+        refreshUsers,
+        refreshUserApiKey,
 
         rewardsHistory,
         issueReward,

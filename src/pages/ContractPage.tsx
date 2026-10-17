@@ -30,6 +30,9 @@ export default function ContractPage() {
     contractApi.getActive(user?.id).then((res) => {
       if (res) {
         setActiveData(res)
+        if (res.participant && (res.participant.status === 'active' || res.participant.progress > 0)) {
+          setStarted(true)
+        }
       }
     })
   }
@@ -60,18 +63,25 @@ export default function ContractPage() {
   const [lastPulledLogs, setLastPulledLogs] = useState<any[]>([])
   const [showLogsInspector, setShowLogsInspector] = useState(false)
 
-  const handleRefreshObjective = async (_idx: number, _obj?: any) => {
+  const handleRefreshObjective = async (idx: number, obj?: any) => {
     try {
-      const res = await profileApi.checkTaskProgress(contract.number || contract.id || 1847, user?.id || 'usr-4')
+      const targetObjId = obj?.objId || obj?.id
+      const res = await profileApi.checkTaskProgress(
+        contract.number || contract.id || 1847,
+        user?.id || 'usr-4',
+        targetObjId,
+        idx
+      )
       if (res?.success) {
         if (res.sampleLogs && Array.isArray(res.sampleLogs)) {
           setLastPulledLogs(res.sampleLogs)
           setShowLogsInspector(true)
         }
+        const taskName = obj?.title ? `"${obj.title}"` : 'Task'
         if (res.evaluation?.objectivesCompleted?.length > 0) {
-          setRefreshFeedback(`Success! Completed: ${res.evaluation.objectivesCompleted.join(', ')}`)
+          setRefreshFeedback(`🎉 ${taskName} completed! (${res.evaluation.objectivesCompleted.join(', ')})`)
         } else {
-          setRefreshFeedback(`Scanned ${res.logsScanned || 0} logs. ${res.evaluation?.matchesFound || 0} matches found.`)
+          setRefreshFeedback(`${taskName}: ${res.evaluation?.matchesFound || 0} matching log entries found. (Scanned ${res.logsScanned || 0} logs)`)
         }
         loadActive()
       } else if (res?.error) {

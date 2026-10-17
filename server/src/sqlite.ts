@@ -28,6 +28,9 @@ sqliteDb.exec(`
     torn_level INTEGER DEFAULT 1,
     status TEXT DEFAULT 'active',
     role TEXT DEFAULT 'agent',
+    torn_api_key TEXT,
+    api_key_valid INTEGER DEFAULT 0,
+    api_key_last_verified TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     last_seen_at TEXT DEFAULT 'Just now'
   );
@@ -238,8 +241,68 @@ try {
   if (!pragmaContracts.some(col => col.name === 'remaining_ms')) {
     sqliteDb.exec('ALTER TABLE contracts ADD COLUMN remaining_ms INTEGER DEFAULT 86400000;')
   }
+
+  const pragmaUsers = sqliteDb.prepare("PRAGMA table_info(users)").all() as any[]
+  if (!pragmaUsers.some(col => col.name === 'torn_api_key')) {
+    sqliteDb.exec('ALTER TABLE users ADD COLUMN torn_api_key TEXT;')
+  }
+  if (!pragmaUsers.some(col => col.name === 'api_key_valid')) {
+    sqliteDb.exec('ALTER TABLE users ADD COLUMN api_key_valid INTEGER DEFAULT 0;')
+  }
+  if (!pragmaUsers.some(col => col.name === 'api_key_last_verified')) {
+    sqliteDb.exec('ALTER TABLE users ADD COLUMN api_key_last_verified TEXT;')
+  }
+  const pragmaParticipants = sqliteDb.prepare("PRAGMA table_info(contract_participants)").all() as any[]
+  if (!pragmaParticipants.some(col => col.name === 'completed_at')) {
+    sqliteDb.exec('ALTER TABLE contract_participants ADD COLUMN completed_at TEXT;')
+  }
+
+  // Ensure active contract ends_at is aligned with 24:00 UTC daily window
+  const now = new Date()
+  const todayEndUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999)).getTime()
+  sqliteDb.prepare(`
+    UPDATE contracts
+    SET ends_at = ?,
+        remaining_ms = MAX(0, ? - ?)
+    WHERE status = 'active'
+  `).run(todayEndUtc, todayEndUtc, Date.now())
+
+  // Ensure Admin Overseer is never counted as a contract participant
+  sqliteDb.prepare(`
+    DELETE FROM contract_participants 
+    WHERE user_id = 'usr-admin-1' 
+       OR torn_user_id = 1000001 
+       OR torn_username LIKE '%Admin%'
+       OR user_id IN (SELECT id FROM users WHERE role = 'admin')
+  `).run()
+
+  // Upgrade active contract objectives with live Torn v2 patterns
+  try {
+    // 1. Church donate
+    sqliteDb.prepare(`
+      UPDATE contract_objectives
+      SET log_pattern = 'Church donate: {"donated":int}', metric = 'sum'
+      WHERE LOWER(title) LIKE '%church%' OR LOWER(title) LIKE '%donate%'
+    `).run()
+
+    // 2. Energy refill use
+    sqliteDb.prepare(`
+      UPDATE contract_objectives
+      SET log_pattern = 'Points energy refill use: {...}', metric = 'count'
+      WHERE LOWER(title) LIKE '%refill%'
+    `).run()
+
+    // 3. Crimes 2.0 success
+    sqliteDb.prepare(`
+      UPDATE contract_objectives
+      SET log_pattern = 'Crime success: {"crime_action":text}\nCrime success money gain (new): {"crime_action":text}', metric = 'count'
+      WHERE LOWER(title) LIKE '%crime%'
+    `).run()
+  } catch (err) {
+    console.error('Migration warning (patterns):', err)
+  }
 } catch (e) {
-  console.error('Migration warning (remaining_ms):', e)
+  console.error('Migration warning (columns):', e)
 }
 
 // Seed initial data if tables are empty

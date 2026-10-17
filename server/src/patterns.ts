@@ -81,49 +81,154 @@ export function compileTemplateToRegex(template: string, caseInsensitive = false
       }
     }
 
-    // Check for placeholder: {name:type} or {...}
+    // Check for placeholder: {name:type}, {"name":type}, {...}, or JSON object: {"key":type, ...}
     if (template[pos] === '{') {
-      const closeBrace = template.indexOf('}', pos + 1)
+      let depth = 0
+      let closeBrace = -1
+      for (let i = pos; i < template.length; i++) {
+        if (template[i] === '{') depth++
+        else if (template[i] === '}') {
+          depth--
+          if (depth === 0) {
+            closeBrace = i
+            break
+          }
+        }
+      }
+
       if (closeBrace !== -1) {
-        const placeholder = template.slice(pos + 1, closeBrace).trim()
+        const inner = template.slice(pos + 1, closeBrace).trim()
         pos = closeBrace + 1
 
-        if (placeholder === '...') {
+        if (inner === '...' && !template.slice(0, pos - 5).includes(':')) {
           // Anonymous wildcard
           regexStr += '.*?'
           continue
         }
 
-        const parts = placeholder.split(':')
-        const name = parts[0].trim()
-        const type = (parts[1] || 'text').trim()
+        // Check if inner is a simple placeholder: {identifier:type} or {identifier}
+        // (Must NOT contain quotes, commas, colons with quotes, or curly braces)
+        const isSimplePlaceholder =
+          !inner.includes('"') &&
+          !inner.includes("'") &&
+          !inner.includes(',') &&
+          !inner.includes('{') &&
+          /^[a-z_][a-z0-9_]*(?::[a-z0-9_]+)?$/i.test(inner)
 
-        if (!/^[a-z][a-z0-9_]{0,31}$/i.test(name)) {
-          throw new Error(`Invalid capture name: "${name}". Must match [a-z][a-z0-9_]{0,31}`)
+        if (isSimplePlaceholder) {
+          const colonIdx = inner.lastIndexOf(':')
+          let name = ''
+          let type = 'text'
+
+          if (colonIdx !== -1) {
+            name = inner.slice(0, colonIdx).trim()
+            type = inner.slice(colonIdx + 1).trim()
+          } else {
+            name = inner
+            type = 'text'
+          }
+
+          const cleanName = name.replace(/^["']|["']$/g, '').trim()
+
+          let typeRegex = '.+?'
+          switch (type) {
+            case 'money':
+              typeRegex = '\\$?[\\d,]+'
+              break
+            case 'int':
+              typeRegex = '\\d[\\d,]*'
+              break
+            case 'number':
+              typeRegex = '\\d[\\d,]*(?:\\.\\d+)?'
+              break
+            case 'word':
+              typeRegex = '\\S+'
+              break
+            case 'text':
+            default:
+              typeRegex = pos >= template.length ? '.+' : '.+?'
+              break
+          }
+
+          // Support both plain text logs and Torn JSON formatted logs e.g. {"cleanName":100}
+          regexStr += `(?:\\{.*?"${cleanName}"\\s*:\\s*)?(?<${cleanName}>${typeRegex})(?:.*?\\})?`
+          continue
         }
 
-        let typeRegex = '.+?'
-        switch (type) {
-          case 'int':
-            typeRegex = '\\d[\\d,]*'
-            break
-          case 'number':
-            typeRegex = '\\d[\\d,]*(?:\\.\\d+)?'
-            break
-          case 'word':
-            typeRegex = '\\S+'
-            break
-          case 'text':
-          default:
-            // If placeholder is at the end of the template, use .+ so it captures the rest of the line
-            typeRegex = pos >= template.length ? '.+' : '.+?'
-            break
+        // Extract key-value specifications
+        // Handles "key": value, "key": "value", "key": {placeholder}, etc.
+        const kvMatches = [...inner.matchAll(/"([^"]+)"\s*:\s*("(?:[^"\\]|\\.)*"|\{[^}]+\}|[^,}]+)/g)]
+        const snippets: string[] = []
+
+        for (const match of kvMatches) {
+          const key = match[1].trim()
+          let val = match[2].trim()
+
+          // Check if val is a placeholder like {subKey:type} or {subKey}
+          const subMatch = val.match(/^\{([a-z_][a-z0-9_]*)(?::([a-z0-9_]+))?\}$/i)
+          let captureName = key
+          let type = val
+
+          if (subMatch) {
+            captureName = subMatch[1]
+            type = subMatch[2] || 'text'
+          }
+
+          let valRegex = ''
+          switch (type.toLowerCase()) {
+            case 'int':
+              valRegex = `(?<${captureName}>\\d[\\d,]*)`
+              break
+            case 'money':
+              valRegex = `(?<${captureName}>\\$?[\\d,]+(?:\\.\\d{2})?)`
+              break
+            case 'number':
+              valRegex = `(?<${captureName}>\\d[\\d,]*(?:\\.\\d+)?)`
+              break
+            case 'word':
+              valRegex = `(?<${captureName}>\\S+)`
+              break
+            case 'text':
+              // Matches quoted JSON string or unquoted value
+              valRegex = `(?:"(?<${captureName}>[^"\\\\]*(?:\\\\.[^"\\\\]*)*)"|(?<${captureName}>[^",}]+))`
+              break
+            default:
+              // Literal value (e.g. 100, 1, "medical", "Japan", true)
+              if (/^["'].*["']$/.test(val)) {
+                const unquoted = val.replace(/^["']|["']$/g, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                valRegex = `"${unquoted}"`
+              } else if (/^\d[\d,]*(?:\.\d+)?$/.test(val)) {
+                valRegex = `(?<${captureName}>${val.replace(/,/g, '')})`
+              } else {
+                valRegex = val.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+              }
+              break
+          }
+
+          let keyPattern = `"${key}"`
+          if (/^(amount|donated|money|cash|value)$/i.test(key)) {
+            keyPattern = `(?:"${key}"|"donated"|"amount"|"money"|"cash")`
+          } else if (/^(energy|energy_used)$/i.test(key)) {
+            keyPattern = `(?:"${key}"|"energy_used"|"energy")`
+          } else if (/^(opponent|defender|target)$/i.test(key)) {
+            keyPattern = `(?:"${key}"|"opponent"|"defender"|"target")`
+          }
+
+          snippets.push(`${keyPattern}\\s*:\\s*${valRegex}`)
         }
 
-        regexStr += `(?<${name}>${typeRegex})`
+        if (snippets.length > 0) {
+          regexStr += '\\{.*?' + snippets.join('.*?') + '.*?\\}'
+        } else if (inner === '...' || inner === '') {
+          regexStr += '\\{.*?\\}'
+        } else {
+          regexStr += '\\{' + inner.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\}'
+        }
         continue
       }
     }
+
+
 
     // Handle normal characters - spaces collapse to \s+
     if (/\s/.test(template[pos])) {
@@ -131,6 +236,13 @@ export function compileTemplateToRegex(template: string, caseInsensitive = false
         pos++
       }
       regexStr += '\\s+'
+      continue
+    }
+
+    // If there is a literal '$' right before a placeholder, make it optional: \s*\$?
+    if (template[pos] === '$') {
+      regexStr += '\\$?'
+      pos++
       continue
     }
 
@@ -277,10 +389,17 @@ export function testLogLine(
       let value = 1
       let distinctKey: string | undefined = undefined
 
-      if (metric === 'sum' && p.valueCapture) {
-        const rawNum = captures[p.valueCapture]
-        if (rawNum) {
-          value = parseFloat(String(rawNum).replace(/,/g, '')) || 0
+      if (metric === 'sum') {
+        const numericKeys = Object.keys(captures).filter((k) => !/^(details|rest|stat|info|category|title|action)$/i.test(k))
+        const captureKey =
+          p.valueCapture ||
+          numericKeys.find((k) => /^(energy_used|energy|donated|amount|money|cost|price|value|nerve|count|num)$/i.test(k)) ||
+          numericKeys.find((k) => /energy|amount|donated|money|value|nerve|count|num/i.test(k)) ||
+          numericKeys[0]
+
+        if (captureKey && captures[captureKey]) {
+          const cleanNum = String(captures[captureKey]).replace(/[^\d.]/g, '')
+          value = parseFloat(cleanNum) || 0
         }
       } else if (metric === 'distinct' && p.valueCapture) {
         const rawKey = captures[p.valueCapture]
